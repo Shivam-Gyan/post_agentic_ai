@@ -1,3 +1,4 @@
+from typing import List
 from langchain_core.messages import SystemMessage, HumanMessage
 from states import PlanSchema, TaskSchema
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -179,3 +180,4 @@ def worker_prompt(task: TaskSchema, blog_topic: str, plan: PlanSchema, audience:
             )
         ),
     ]
+
