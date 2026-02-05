@@ -5,12 +5,12 @@ import time
 import re
 
 LOADING_MESSAGES = [
-    "🧠 Planning blog structure...",
-    "✍️ Writing sections in parallel...",
-    "📚 Adding real-world insights...",
-    "🧩 Stitching everything together...",
-    "✨ Polishing the final blog...",
-    "🚀 Almost there..."
+    "🧠 Planning blog structure  ",
+    "✍️ Writing sections in parallel  ",
+    "📚 Adding real-world insights  ",
+    "🧩 Stitching everything together  ",
+    "✨ Polishing the final blog  ",
+    "🚀 Almost there  "
 ]
 
 
