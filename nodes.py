@@ -18,7 +18,13 @@ async def detail_node(state:BlogState) -> dict:
         # 2. call the structured output model to extract details from blog description
         response = cast(DetailsSchema, await detail_structured_output_model.ainvoke(prompt))
 
-        # print("Extracted details from blog description:", response)
+        print("Extracted details from blog description :\n")
+        print(f"Topic: {response.topic}\n") #type: ignore
+        print(f"Description: {response.description}\n") #type: ignore
+        print(f"Audience: {response.audience}\n") #type: ignore
+        print(f"Tone: {response.tone}\n") #type: ignore
+
+        
         #  return the extracted details to update the state
         print("Detail_node : Extracted details from blog description complete.\n")
         return {
@@ -31,7 +37,6 @@ async def detail_node(state:BlogState) -> dict:
 
         print(f"Detail_node : Error in detail_node: {e}")
         raise e 
-    
 
 
 #  2. Orchestration logic for the blog planning process
