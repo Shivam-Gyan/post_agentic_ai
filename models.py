@@ -1,5 +1,5 @@
 from langchain_ollama import ChatOllama
-from states import DetailsSchema, PlanSchema
+from states import EvidencePackSchema, ResearchSchema, PlanSchema
 import itertools
 from langchain_groq import ChatGroq
 from dotenv import load_dotenv
@@ -17,11 +17,14 @@ structure_model = ChatGroq(
 ) 
 
 # model to extract details from the initial blog description provided by user
-detail_structured_output_model = structure_model.with_structured_output(DetailsSchema) 
+research_structured_output_model = structure_model.with_structured_output(ResearchSchema) 
 
  # planning model to generate the plan for the blog
 structured_output_model = structure_model.with_structured_output(PlanSchema)
 
+
+# model to perform research based on the research queries provided by the orchestrator node
+structured_output_model_research = structure_model.with_structured_output(EvidencePackSchema)
 
 # 2. model used to generate the blog sections and final blog post
 

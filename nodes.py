@@ -1,70 +1,121 @@
-from models import structured_output_model, get_generation_model,detail_structured_output_model
-from states import BlogState, DetailsSchema
-from prompts import get_blog_planning_prompt, worker_prompt,get_detail_extraction_prompt
+from models import structured_output_model, get_generation_model,research_structured_output_model, structured_output_model_research
+from states import BlogState, EvidencePackSchema, PlanSchema, ResearchSchema
+from prompts import get_blog_planning_prompt, worker_prompt,get_router_prompt, get_evidence_research_prompt
 from typing import Dict, List, cast
 from langgraph.types import Send
-# from pathlib import Path
-# import asyncio
+from langgraph.graph import END
 
-from utils import safe_filename
+
+from utils import normalize_tavily_results, perform_research, safe_filename
 
 #  1. get the blog_topic and other details from initial state
 
-async def detail_node(state:BlogState) -> dict:
+async def router_node(state:BlogState) -> dict:
     try:
-        print("Detail_node : Extracting details from blog description...\n")
+        print("Router_node : Extracting details from blog description...\n")
         # 1. Get the prompt for detail extraction
-        prompt = get_detail_extraction_prompt(state.blog_description)
+        prompt = get_router_prompt(state.blog_description)
         # 2. call the structured output model to extract details from blog description
-        response = cast(DetailsSchema, await detail_structured_output_model.ainvoke(prompt))
+        response = cast(ResearchSchema, await research_structured_output_model.ainvoke(prompt))
 
         print("Extracted details from blog description :\n")
-        print(f"Topic: {response.topic}\n") #type: ignore
-        print(f"Description: {response.description}\n") #type: ignore
-        print(f"Audience: {response.audience}\n") #type: ignore
-        print(f"Tone: {response.tone}\n") #type: ignore
+        print(f"Topic: {response.topic}") #type: ignore
+        print(f"Description: {response.description}") #type: ignore
+        print(f"Audience: {response.audience}") #type: ignore
+        print(f"Tone: {response.tone}") #type: ignore
+        print(f"Require Research: {response.require_research}") #type: ignore
+        print(f"Research Mode: {response.research_mode}") #type: ignore
+        print(f"Research Queries: {[query for query in response.research_queries]}\n") #type: ignore
 
-        
+
         #  return the extracted details to update the state
-        print("Detail_node : Extracted details from blog description complete.\n")
+        print("Router_node : Detail extraction complete.\n")
         return {
             'blog_topic': response.topic, #type: ignore
             'blog_description': response.description, #type: ignore
             'audience': response.audience,  #type: ignore
-            'tone': response.tone   
+            'tone': response.tone,  #type: ignore
+            'require_research': response.require_research,  #type: ignore
+            'research_mode': response.research_mode,  #type: ignore
+            'research_queries': response.research_queries  #type: ignore
             }
     except Exception as e:
 
-        print(f"Detail_node : Error in detail_node: {e}")
+        print(f"Research_node : Error in research_node: {e}")
         raise e 
 
 
-#  2. Orchestration logic for the blog planning process
-async def generate_blog_plan(state:BlogState) -> Dict:
+# Routing Conditon
+def router_condition_func(state: BlogState) -> str:
+    if state.require_research:
+        return 'research_node'
+    else:
+        # return END
+        return 'orchestrator'
+
+
+# 2. Research_node
+async def research_node(state:BlogState) -> dict:
+
+    # get queries from state
+    queries = state.research_queries or []
+
+    result_list_dict: List[Dict] = []
+
+    for query in queries:
+        result = await perform_research(query)
+        # result_list_dict.append(result) #type: ignore
+        result_list_dict.extend(result.get("results", []))
+
+    if not result_list_dict:
+        return {'evidence': []}
+    
+
+    # normalize the results into a consistent format for the reducer to consume
+    normalized_results = normalize_tavily_results(result_list_dict)
+
+    # get the prompt for evidence extraction from normalized research results
+    evidence_research_prompt = get_evidence_research_prompt(normalized_results) 
+
+    # call the structured output model to extract evidence from research results
+    response = cast(EvidencePackSchema, await structured_output_model_research.ainvoke(evidence_research_prompt))
+
+    print("Research_node : Research complete. Evidence collected:\n")
+    # print(response.evidence) #type: ignore
+
+    return {'evidence': response.evidence} #type: ignore
+
+
+
+
+
+#  3. Orchestration logic for the blog planning process
+async def orchestrator(state:BlogState) -> Dict:
     try:
         print("Orchestrator : Generating blog plan...\n")
         # 1. Get the prompt for blog planning
-        blog_decription = state.blog_description
+        blog_description = state.blog_description
         blog_topic = state.blog_topic
         blog_audience = state.audience
         blog_tone = state.tone
+        blog_evidence = state.evidence
 
-        prompt = get_blog_planning_prompt(blog_topic, blog_decription, blog_audience, blog_tone)
+        prompt = get_blog_planning_prompt(blog_topic, blog_description, blog_audience, blog_tone, blog_evidence)
 
         # 2. call the structured output model to generate the plan
-        response = await structured_output_model.ainvoke(prompt)
+        response = cast(PlanSchema, await structured_output_model.ainvoke(prompt))
 
         # print("Raw response from model:\n\n", response)
         print("Orchestrator : Blog plan generation complete.\n")
 
-        return {'plan': response }
+        return {'plan': response ,"blog_title": response.blog_title} #type: ignore
     except Exception as e:
         print(f"Orchestrator : Error in generate_blog_plan: {e}")
         raise e
 
 
 
-#  3. intermediate function between orchestrator and workers
+#  4. intermediate function between orchestrator and workers
 # Now we define the fanout function for the node
 # which will create multiple worker for as per task in plan 
 # after the plan generated 
@@ -89,6 +140,7 @@ def fanout(state: BlogState) -> List[Send]:
                         "plan": state.plan,
                         "audience": state.audience,
                         "tone": state.tone,
+                        'evidence' : state.evidence  
                     },
                 )
             )
@@ -99,7 +151,7 @@ def fanout(state: BlogState) -> List[Send]:
         # this will surface clearly in LangGraph logs
         raise RuntimeError(f"[fanout] failed: {e}") from e
 
-#  4. actual generation of each task seggregated by worker will executed by worker node
+#  5. actual generation of each task seggregated by worker will executed by worker node
 async def worker(payload: dict) -> dict:
     try:
         # ---- Validate payload ----
@@ -113,6 +165,7 @@ async def worker(payload: dict) -> dict:
         plan = payload["plan"]
         audience = payload["audience"]
         tone = payload["tone"]
+        evidence = payload.get("evidence", [])
 
         # ---- Build prompt for grouped tasks ----
         prompt = worker_prompt(
@@ -121,6 +174,7 @@ async def worker(payload: dict) -> dict:
             plan=plan,
             audience=audience,
             tone=tone,
+            evidence=evidence
         )
 
         # ---- Model inference (GPU-bound) ----
@@ -152,12 +206,12 @@ async def worker(payload: dict) -> dict:
         # so the reducer and graph can continue
         return {"sections": [error_section]}
 
-#  5. reducer to aggregate all sections from workers into final blog
+#  6. reducer to aggregate all sections from workers into final blog
 async def reducer(state:BlogState):
     try:   
 
         print("Reducer : Aggregating sections from workers...\n")
-        title = state.plan.blog_title
+        title = state.blog_title or "Untitled Blog"
         blog = "\n\n".join(state.sections)
 
         final_blog = f"# {title}\n\n{blog}"
@@ -173,3 +227,5 @@ async def reducer(state:BlogState):
     except Exception as e:
         print(f"Error in reducer: {e}")
         raise e
+    
+

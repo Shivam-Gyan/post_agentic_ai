@@ -2,24 +2,30 @@
 import asyncio
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
-from nodes import detail_node, fanout, generate_blog_plan, reducer, worker
+from nodes import router_node,research_node, router_condition_func, fanout, orchestrator, reducer, worker
 from states import BlogState
 
 # 1. initialize the state graph
 graph = StateGraph(BlogState)
 
 # 2. define the nodes
-graph.add_node('generate_blog_plan', generate_blog_plan)
+graph.add_node('orchestrator', orchestrator)
 graph.add_node('worker', worker) #type: ignore
 graph.add_node('reducer',reducer)
-graph.add_node('detail_node', detail_node)
+graph.add_node('research_node', research_node)
+graph.add_node('router_node', router_node)
+
+
 
 # 3. define the edges
-graph.add_edge(START,'detail_node')
-graph.add_edge('detail_node', 'generate_blog_plan')
-graph.add_conditional_edges('generate_blog_plan',fanout,['worker'])
+graph.add_edge(START,'router_node')
+graph.add_conditional_edges('router_node',router_condition_func )
+# graph.add_edge('research_node', END)
+graph.add_edge('research_node', 'orchestrator')
+graph.add_conditional_edges('orchestrator',fanout,['worker'])
 graph.add_edge('worker', 'reducer')
 graph.add_edge('reducer', END)
+# graph.add_edge('orchestrator', END)
 checkpointer = MemorySaver()
 
 
@@ -53,6 +59,7 @@ async def main():
 
         print("\n\nFinal Blog Output:\n\n")
         print(final_state["final_blog"])
+        # print(final_state)
 
     except Exception as e:
         print(f"\n❌ An error occurred: {e}")
