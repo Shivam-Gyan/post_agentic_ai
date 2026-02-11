@@ -26,7 +26,7 @@ def safe_filename(title: str) -> str:
 
     return f"{name}.md"
 
-
+#  perform tavily search for a given query and return the results
 async def perform_research(query: str):
     # This is a placeholder implementation. You would replace this with actual calls to your search tool or API.
     search_tool = TavilySearch(api_key=TAVILY_API_KEY, max_results=2, search_depth="basic")  # type: ignore
@@ -44,8 +44,6 @@ def normalize_tavily_results(results: List[Dict]) -> List[Dict]:
             "title": r.get("title"),
             "content": r.get("content"),
             "url": r.get("url"),
-            # "source": None,           # Tavily doesn't provide this
-            # "published_date":'date:unknown',   # Tavily doesn't provide this
         })
 
     return normalized

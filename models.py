@@ -12,29 +12,21 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 # structure_model = ChatOllama(model='qwen3:1.7b',temperature=0.4) 
 structure_model = ChatGroq(
     model='qwen/qwen3-32b',
+    # model='openai/gpt-oss-120b',
     api_key = GROQ_API_KEY, # type: ignore
-    temperature=0.4
+    temperature = 0 # Critical for schema adherence
 ) 
 
 # model to extract details from the initial blog description provided by user
-research_structured_output_model = structure_model.with_structured_output(ResearchSchema) 
+research_structured_output_model = structure_model.with_structured_output(ResearchSchema, method="function_calling") 
 
  # planning model to generate the plan for the blog
-structured_output_model = structure_model.with_structured_output(PlanSchema)
-
+structured_output_model = structure_model.with_structured_output(PlanSchema, method="function_calling")
 
 # model to perform research based on the research queries provided by the orchestrator node
-structured_output_model_research = structure_model.with_structured_output(EvidencePackSchema)
+structured_output_model_research = structure_model.with_structured_output(EvidencePackSchema, method="function_calling")
 
 # 2. model used to generate the blog sections and final blog post
-
-# GEN_MODELS = [
-#     ChatOllama(model='ministral-3:3b',temperature=0.4),
-#     ChatOllama(model='qwen3:1.7b-q4_K_M',temperature=0.4) 
-# ]
-
-
-# _generation_cycle = itertools.cycle(GEN_MODELS)
 
 # generation_model = ChatOllama(model='deepseek-r1:1.5b',temperature=0.4)
 

@@ -41,7 +41,7 @@ async def router_node(state:BlogState) -> dict:
             }
     except Exception as e:
 
-        print(f"Research_node : Error in research_node: {e}")
+        print(f"Router_node : Error in router_node: {e}")
         raise e 
 
 
@@ -60,19 +60,29 @@ async def research_node(state:BlogState) -> dict:
     # get queries from state
     queries = state.research_queries or []
 
-    result_list_dict: List[Dict] = []
+    raw_result: List[Dict] = []
 
     for query in queries:
         result = await perform_research(query)
         # result_list_dict.append(result) #type: ignore
-        result_list_dict.extend(result.get("results", []))
+        raw_result.extend(result.get("results", []))
 
-    if not result_list_dict:
+    if not raw_result:
         return {'evidence': []}
+    
+    # 2. Deduplicate by URL (Critical for Production)
+    unique_results = {}
+    for r in raw_result:
+        url = r.get("url")
+        if url not in unique_results:
+            unique_results[url] = r
+    
+
+    deduplicated_list = list(unique_results.values())
     
 
     # normalize the results into a consistent format for the reducer to consume
-    normalized_results = normalize_tavily_results(result_list_dict)
+    normalized_results = normalize_tavily_results(deduplicated_list)
 
     # get the prompt for evidence extraction from normalized research results
     evidence_research_prompt = get_evidence_research_prompt(normalized_results) 
@@ -81,11 +91,9 @@ async def research_node(state:BlogState) -> dict:
     response = cast(EvidencePackSchema, await structured_output_model_research.ainvoke(evidence_research_prompt))
 
     print("Research_node : Research complete. Evidence collected:\n")
-    # print(response.evidence) #type: ignore
+    print(response.evidence) #type: ignore
 
     return {'evidence': response.evidence} #type: ignore
-
-
 
 
 

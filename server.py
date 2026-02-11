@@ -25,6 +25,7 @@ graph.add_edge('research_node', 'orchestrator')
 graph.add_conditional_edges('orchestrator',fanout,['worker'])
 graph.add_edge('worker', 'reducer')
 graph.add_edge('reducer', END)
+# graph.add_edge('router_node', END)
 # graph.add_edge('orchestrator', END)
 checkpointer = MemorySaver()
 
@@ -34,40 +35,40 @@ blog_agentic_ai = graph.compile(checkpointer=checkpointer)
 
 
 
-async def main():
-    print("\n----------- Agentic AI Blog Generator ----------\n")
+# async def main():
+#     print("\n----------- Agentic AI Blog Generator ----------\n")
 
-    user_input= input("Please enter the blog description: ")
-    print(f"\nUser : {user_input}\n")
+#     user_input= input("Please enter the blog description: ")
+#     print(f"\nUser : {user_input}\n")
 
-    initial_state = BlogState(
-        blog_description=user_input,
-        # blog_topic="Discovery of rocket science and its impact on modern space exploration"
-    )
+#     initial_state = BlogState(
+#         blog_description=user_input,
+#         # blog_topic="Discovery of rocket science and its impact on modern space exploration"
+#     )
 
-    config = {
-        "configurable": {
-            "thread_id": "blog_generation_thread",
-        }
-    }
+#     config = {
+#         "configurable": {
+#             "thread_id": "blog_generation_thread",
+#         }
+#     }
 
 
 
-    try:
-        # 🔥 Async call (graph runs here)
-        final_state = await blog_agentic_ai.ainvoke(initial_state, config=config)  # type: ignore
+#     try:
+#         # 🔥 Async call (graph runs here)
+#         final_state = await blog_agentic_ai.ainvoke(initial_state, config=config)  # type: ignore
 
-        print("\n\nFinal Blog Output:\n\n")
-        print(final_state["final_blog"])
-        # print(final_state)
+#         print("\n\nFinal Blog Output:\n\n")
+#         print(final_state["final_blog"])
+#         # print(final_state)
 
-    except Exception as e:
-        print(f"\n❌ An error occurred: {e}")
+#     except Exception as e:
+#         print(f"\n❌ An error occurred: {e}")
 
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n\n⚠️ Process interrupted by user.")
-    except Exception as e:
-        print(f"\n\n❌ Unexpected error: {e}")
+# if __name__ == "__main__":
+#     try:
+#         asyncio.run(main())
+#     except KeyboardInterrupt:
+#         print("\n\n⚠️ Process interrupted by user.")
+#     except Exception as e:
+#         print(f"\n\n❌ Unexpected error: {e}")
