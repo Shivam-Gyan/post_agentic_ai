@@ -28,8 +28,10 @@ async def router_node(state:BlogState) -> dict:
             'tone': response.tone,  #type: ignore
             'require_research': response.require_research,  #type: ignore
             'research_mode': response.research_mode,  #type: ignore
-            'research_queries': response.research_queries  #type: ignore
+            'research_queries': response.research_queries, #type: ignore
+            'blog_kind': response.blog_kind #type: ignore
             }
+    
     except Exception as e:
 
         print(f"Router_node : Error in router_node: {e}")
