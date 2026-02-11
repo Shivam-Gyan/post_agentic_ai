@@ -18,18 +18,9 @@ async def router_node(state:BlogState) -> dict:
         # 2. call the structured output model to extract details from blog description
         response = cast(ResearchSchema, await research_structured_output_model.ainvoke(prompt))
 
-        print("Extracted details from blog description :\n")
-        print(f"Topic: {response.topic}") #type: ignore
-        print(f"Description: {response.description}") #type: ignore
-        print(f"Audience: {response.audience}") #type: ignore
-        print(f"Tone: {response.tone}") #type: ignore
-        print(f"Require Research: {response.require_research}") #type: ignore
-        print(f"Research Mode: {response.research_mode}") #type: ignore
-        print(f"Research Queries: {[query for query in response.research_queries]}\n") #type: ignore
-
-
         #  return the extracted details to update the state
         print("Router_node : Detail extraction complete.\n")
+
         return {
             'blog_topic': response.topic, #type: ignore
             'blog_description': response.description, #type: ignore
@@ -91,7 +82,6 @@ async def research_node(state:BlogState) -> dict:
     response = cast(EvidencePackSchema, await structured_output_model_research.ainvoke(evidence_research_prompt))
 
     print("Research_node : Research complete. Evidence collected:\n")
-    print(response.evidence) #type: ignore
 
     return {'evidence': response.evidence} #type: ignore
 
@@ -175,6 +165,15 @@ async def worker(payload: dict) -> dict:
         tone = payload["tone"]
         evidence = payload.get("evidence", [])
 
+        if not blog_topic or not plan:
+            raise ValueError("Missing blog topic or plan in worker payload")
+        
+        if not audience or not tone:
+            raise ValueError("Missing audience or tone in worker payload")
+
+        if not evidence:
+            raise ValueError("Missing evidence in worker payload")
+
         # ---- Build prompt for grouped tasks ----
         prompt = worker_prompt(
             task=task,
@@ -192,7 +191,9 @@ async def worker(payload: dict) -> dict:
         content = response_msg.content.strip() #type: ignore
         if not content:
             raise ValueError("Empty response from model")
+        
         print(f"Worker : Section generation complete for task: {getattr(task, 'title', 'unknown')}.\n")
+
         return {"sections": [content]}
 
     except Exception as e:
