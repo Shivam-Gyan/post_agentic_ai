@@ -2,8 +2,10 @@ from models import structured_output_model, get_generation_model,research_struct
 from states import BlogState, EvidencePackSchema, PlanSchema, ResearchSchema
 from prompts import get_blog_planning_prompt, worker_prompt,get_router_prompt, get_evidence_research_prompt
 from typing import Dict, List, cast
-from langgraph.types import Send
+from langgraph.types import Send, interrupt
+from langgraph.errors import GraphInterrupt
 from langgraph.graph import END
+import httpx
 
 
 from utils import normalize_tavily_results, perform_research, safe_filename
@@ -238,5 +240,69 @@ async def reducer(state:BlogState):
     except Exception as e:
         print(f"Error in reducer: {e}")
         raise e
+
+
+#  7. HITL publish node – asks user whether to post blog to Feather Feable
+async def publish_node(state: BlogState) -> dict:
+    """Human-in-the-loop node: interrupt the graph and wait for the user
+    to decide whether to publish the blog to Feather Feable."""
+    try:
+        print("Publish_node : Waiting for user decision on publishing...\n")
+
+        # ---- Interrupt – control returns to the client ----
+        user_response = interrupt({
+            "question": "Do you want to publish this blog to Feather Feable blog web app?",
+            "options": ["yes", "no"]
+        })
+
+        # ---- User chose to publish ----
+        if isinstance(user_response, dict) and user_response.get("approved"):
+            access_token = user_response.get("access_token", "")
+            if not access_token:
+                print("Publish_node : No access token provided. Skipping publish.\n")
+                return {"publish_result": "❌ Publishing skipped: No access token provided."}
+
+            print("Publish_node : Publishing blog to Feather Feable...\n")
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    "http://localhost:8080/api/v1/blog/auto-blog",
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "title": state.blog_title or "Untitled Blog",
+                        "tags": ["ai", "auto-generated"],
+                        "des": (state.blog_description or "")[:250],
+                        "markdown": state.final_blog,
+                    },
+                    timeout=30.0,
+                )
+
+            if response.status_code in (200, 201):
+                print(f"Publish_node : Blog published successfully! Status: {response.status_code}\n")
+                return {"publish_result": f"✅ Blog published successfully! (HTTP {response.status_code})"}
+            else:
+                print(f"Publish_node : Publishing failed. Status: {response.status_code}\n")
+                return {
+                    "publish_result": (
+                        f"❌ Publishing failed. HTTP {response.status_code} — "
+                        f"{response.text[:300]}"
+                    )
+                }
+
+        # ---- User chose NOT to publish ----
+        else:
+            print("Publish_node : User skipped publishing.\n")
+            return {"publish_result": "⏭️ Publishing skipped by user."}
+
+    except httpx.RequestError as e:
+        print(f"Publish_node : Network error during publishing: {e}\n")
+        return {"publish_result": f"❌ Network error: {str(e)}"}
+    except GraphInterrupt:
+        raise  # Let the interrupt propagate to pause the graph
+    except Exception as e:
+        print(f"Publish_node : Unexpected error: {e}\n")
+        return {"publish_result": f"❌ Unexpected error: {str(e)}"}
     
 

@@ -7,8 +7,17 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
-from server import blog_agentic_ai  # Your backend app
+from langgraph.types import Command
+from langgraph.errors import GraphInterrupt
 from states import BlogState        # Your Pydantic State
+
+
+# Cache the compiled graph so MemorySaver survives Streamlit reruns / file-watcher reloads
+@st.cache_resource
+def get_blog_app():
+    from server import build_blog_graph
+    return build_blog_graph()
+
 
 # -----------------------------
 # Helpers
@@ -48,6 +57,10 @@ if "last_out" not in st.session_state:
     st.session_state["last_out"] = None
 if "logs" not in st.session_state:
     st.session_state["logs"] = []
+if "interrupted" not in st.session_state:
+    st.session_state["interrupted"] = False
+if "pipeline_config" not in st.session_state:
+    st.session_state["pipeline_config"] = None
 
 # --- Sidebar Control Panel ---
 with st.sidebar:
@@ -60,7 +73,73 @@ with st.sidebar:
     if st.button("Clear History"):
         st.session_state["last_out"] = None
         st.session_state["logs"] = []
+        st.session_state["interrupted"] = False
+        st.session_state["pipeline_config"] = None
+        get_blog_app.clear()  # Reset MemorySaver so next run starts fresh
         st.rerun()
+
+    # --- Publish to Feather Feable (HITL) ---
+    if st.session_state["interrupted"]:
+        st.divider()
+        st.header("📤 Publish Blog")
+        st.write("Blog generated! Publish to **Feather Feable**?")
+
+        publish_choice = st.radio(
+            "Publish to Feather Feable?",
+            ["Yes", "No"],
+            index=1,
+            key="publish_choice",
+        )
+
+        if publish_choice == "Yes":
+            access_token = st.text_input(
+                "Enter your Feather Feable access token:",
+                type="password",
+                key="ff_access_token",
+            )
+            if st.button("🚀 Publish Now", type="primary"):
+                if access_token.strip():
+                    async def resume_publish():
+                        cfg = st.session_state["pipeline_config"]
+                        status = st.status("Publishing to Feather Feable...", expanded=True)
+                        async for event in get_blog_app().astream(
+                            Command(resume={"approved": True, "access_token": access_token.strip()}),
+                            config=cfg,
+                            stream_mode="updates",
+                        ):
+                            for node_name, state_update in event.items():
+                                status.write(f"✔️ Node: `{node_name}`")
+                                log_entry = state_update
+                                if hasattr(state_update, "model_dump"):
+                                    log_entry = state_update.model_dump()
+                                st.session_state["logs"].append(
+                                    f"[{node_name}] {json.dumps(log_entry, default=str)[:500]}..."
+                                )
+                                if isinstance(state_update, dict) and st.session_state["last_out"]:
+                                    st.session_state["last_out"].update(state_update)
+                        st.session_state["interrupted"] = False
+                        status.update(label="✅ Done!", state="complete", expanded=False)
+
+                    asyncio.run(resume_publish())
+                    st.rerun()
+                else:
+                    st.warning("Please enter your access token.")
+        else:
+            if st.button("⏭️ Skip & Finish"):
+                async def resume_skip():
+                    cfg = st.session_state["pipeline_config"]
+                    async for event in get_blog_app().astream(
+                        Command(resume={"approved": False}),
+                        config=cfg,
+                        stream_mode="updates",
+                    ):
+                        for node_name, state_update in event.items():
+                            if isinstance(state_update, dict) and st.session_state["last_out"]:
+                                st.session_state["last_out"].update(state_update)
+                    st.session_state["interrupted"] = False
+
+                asyncio.run(resume_skip())
+                st.rerun()
 
 
 #  adding this CSS to increase the font size of the tabs and add spacing between them for better readability and aesthetics.
@@ -106,36 +185,58 @@ if generate_btn:
         
         current_state_dict: Dict[str, Any] = {}
         
-        async for event in blog_agentic_ai.astream(initial_state, config=config, stream_mode="updates"):#type: ignore
-            for node_name, state_update in event.items():
-                status.write(f"✔️ Node: `{node_name}`")
-                
-                # Merge updates
-                current_state_dict = extract_latest_state(current_state_dict, state_update)
-                
-                # Create the live summary for the JSON display
-                summary = {
-                    "current_node": node_name,
-                    "research_mode": current_state_dict.get("research_mode"),
-                    "research_queries": current_state_dict.get("research_queries", []), # Added this
-                    "evidence_found": len(current_state_dict.get("evidence", [])),
-                    "sections_generated": len(current_state_dict.get("sections", [])),
-                }
-                
-                # Display the JSON
-                progress_area.json(summary)
-                
-                # Log the raw update (using model_dump if it's a pydantic object)
-                log_entry = state_update
-                if hasattr(state_update, "model_dump"):
-                    log_entry = state_update.model_dump()
-                
-                st.session_state["logs"].append(f"[{node_name}] {json.dumps(log_entry, default=str)[:500]}...")
+        try:
+            async for event in get_blog_app().astream(initial_state, config=config, stream_mode="updates"):#type: ignore
+                for node_name, state_update in event.items():
+                    status.write(f"✔️ Node: `{node_name}`")
+                    
+                    # Merge updates
+                    current_state_dict = extract_latest_state(current_state_dict, state_update)
+                    
+                    # Create the live summary for the JSON display
+                    summary = {
+                        "current_node": node_name,
+                        "research_mode": current_state_dict.get("research_mode"),
+                        "research_queries": current_state_dict.get("research_queries", []), # Added this
+                        "evidence_found": len(current_state_dict.get("evidence", [])),
+                        "sections_generated": len(current_state_dict.get("sections", [])),
+                    }
+                    
+                    # Display the JSON
+                    progress_area.json(summary)
+                    
+                    # Log the raw update (using model_dump if it's a pydantic object)
+                    log_entry = state_update
+                    if hasattr(state_update, "model_dump"):
+                        log_entry = state_update.model_dump()
+                    
+                    st.session_state["logs"].append(f"[{node_name}] {json.dumps(log_entry, default=str)[:500]}...")
+        except GraphInterrupt:
+            # Expected — graph paused at interrupt() in publish_node
+            pass
+        except Exception as exc:
+            # Catch wrapped GraphInterrupt (may be raised as tuple in some LangGraph versions)
+            if "Interrupt" in type(exc).__name__ or "interrupt" in str(exc).lower():
+                pass  # Expected HITL interrupt
+            else:
+                raise
 
         st.session_state["last_out"] = current_state_dict
-        status.update(label="✅ Generation Complete!", state="complete", expanded=False)
+
+        # Check if graph is paused at an interrupt (HITL)
+        graph_state = await get_blog_app().aget_state(config)  # type: ignore[arg-type]
+        if graph_state.next:  # graph is interrupted, not finished
+            st.session_state["interrupted"] = True
+            st.session_state["pipeline_config"] = config
+            status.update(label="⏸️ Blog ready — check sidebar to publish!", state="running", expanded=False)
+        else:
+            st.session_state["interrupted"] = False
+            status.update(label="✅ Generation Complete!", state="complete", expanded=False)
 
     asyncio.run(run_pipeline())
+    # Rerun so the sidebar HITL section (rendered earlier) picks up the interrupted flag
+    if st.session_state.get("interrupted"):
+        st.rerun()
 
 # --- Render Results ---
 out = st.session_state.get("last_out")
@@ -224,6 +325,16 @@ if out:
             )
         else:
             st.warning("The blog body is currently empty.")
+
+        # --- Publish Result ---
+        publish_result = out.get("publish_result", "")
+        if publish_result:
+            if "✅" in publish_result:
+                st.success(publish_result)
+            elif "❌" in publish_result:
+                st.error(publish_result)
+            else:
+                st.info(publish_result)
 
     # 4. Logs Tab
     with tab_logs:

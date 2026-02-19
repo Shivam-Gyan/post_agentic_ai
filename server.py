@@ -2,36 +2,40 @@
 import asyncio
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
-from nodes import router_node,research_node, router_condition_func, fanout, orchestrator, reducer, worker
+from nodes import router_node,research_node, router_condition_func, fanout, orchestrator, reducer, worker, publish_node
 from states import BlogState
 
-# 1. initialize the state graph
-graph = StateGraph(BlogState)
 
-# 2. define the nodes
-graph.add_node('orchestrator', orchestrator)
-graph.add_node('worker', worker) #type: ignore
-graph.add_node('reducer',reducer)
-graph.add_node('research_node', research_node)
-graph.add_node('router_node', router_node)
+def build_blog_graph():
+    """Build and compile the blog generation graph.
+    Extracted into a function so Streamlit can cache it with @st.cache_resource
+    and keep the MemorySaver alive across reruns / file-watcher reloads."""
+    # 1. initialize the state graph
+    g = StateGraph(BlogState)
+
+    # 2. define the nodes
+    g.add_node('orchestrator', orchestrator)
+    g.add_node('worker', worker) #type: ignore
+    g.add_node('reducer',reducer)
+    g.add_node('research_node', research_node)
+    g.add_node('router_node', router_node)
+    g.add_node('publish_node', publish_node)
+
+    # 3. define the edges
+    g.add_edge(START,'router_node')
+    g.add_conditional_edges('router_node',router_condition_func )
+    g.add_edge('research_node', 'orchestrator')
+    g.add_conditional_edges('orchestrator',fanout,['worker'])
+    g.add_edge('worker', 'reducer')
+    g.add_edge('reducer', 'publish_node')
+    g.add_edge('publish_node', END)
+
+    cp = MemorySaver()
+    return g.compile(checkpointer=cp)
 
 
-
-# 3. define the edges
-graph.add_edge(START,'router_node')
-graph.add_conditional_edges('router_node',router_condition_func )
-# graph.add_edge('research_node', END)
-graph.add_edge('research_node', 'orchestrator')
-graph.add_conditional_edges('orchestrator',fanout,['worker'])
-graph.add_edge('worker', 'reducer')
-graph.add_edge('reducer', END)
-# graph.add_edge('router_node', END)
-# graph.add_edge('orchestrator', END)
-checkpointer = MemorySaver()
-
-
-# 5. compile the graph
-blog_agentic_ai = graph.compile(checkpointer=checkpointer) 
+# Default module-level instance (used when running without Streamlit)
+blog_agentic_ai = build_blog_graph()
 
 
 

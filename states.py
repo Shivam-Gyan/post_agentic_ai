@@ -49,7 +49,7 @@ class ResearchSchema(BaseModel):
 
 
 class BlogState(BaseModel):
-    blog_description: str = Field(description="A detailed description of the blog topic provided by user")
+    blog_description: str = Field(description="A detailed description of the blog topic provided by user", default="")
 
     blog_title: str = Field(description="The main topic of the blog provided by user", default="")
     blog_topic : str = Field(description="The main topic of the blog provided by user", default="")
@@ -60,8 +60,9 @@ class BlogState(BaseModel):
     research_queries: Annotated[List[str], Field(description="If open-book or hybrid research mode is selected, a list of specific queries to use for retrieving information from external sources")] = []
     blog_kind:Literal["explainer",'tutorial','news_roundup','comparison','system_design'] = Field(description="The kind of blog the user wants to create", default="explainer")
 
-    plan : PlanSchema = Field(description="The plan for the blog including tasks", default = PlanSchema(blog_title="", tasks=[]))  
+    plan : PlanSchema = Field(description="The plan for the blog including tasks", default_factory=lambda: PlanSchema(blog_title="", tasks=[]))  
     evidence: List[EvidenceSchema] = Field(description="The evidence retrieved from research to fill in the gaps in blog description", default=[])  
     sections: Annotated[List[str], Field(description="A list of sections for the blog"), operator.add] = []
 
     final_blog : str = Field(description="The completed blog post", default="")
+    publish_result: str = Field(description="Result of publishing the blog to external platform", default="")
