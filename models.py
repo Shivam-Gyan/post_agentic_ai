@@ -1,5 +1,5 @@
 from langchain_ollama import ChatOllama
-from states import EvidencePackSchema, ResearchSchema, PlanSchema
+from states import EvidencePackSchema, IntentModeStructuredOutputSchema, ResearchSchema, PlanSchema, FeedbackStructuredOutputSchema
 import itertools
 from langchain_groq import ChatGroq
 from dotenv import load_dotenv
@@ -16,6 +16,13 @@ structure_model = ChatGroq(
     api_key = GROQ_API_KEY, # type: ignore
     temperature = 0 # Critical for schema adherence
 ) 
+
+# intent mode detetcion model
+
+intent_structured_output_model = structure_model.with_structured_output(IntentModeStructuredOutputSchema, method="function_calling")
+
+# refine feedback structured output model
+refine_feedback_output_model = structure_model.with_structured_output(FeedbackStructuredOutputSchema, method="function_calling")
 
 # model to extract details from the initial blog description provided by user
 research_structured_output_model = structure_model.with_structured_output(ResearchSchema, method="function_calling") 

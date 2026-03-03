@@ -2,7 +2,6 @@ import streamlit as st
 import asyncio
 import json
 import re
-from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -66,38 +65,70 @@ if "pipeline_config" not in st.session_state:
 with st.sidebar:
     st.header("Control Panel")
     topic_input = st.text_area("Enter Detailed Blog Description:", height=150)
-    as_of = st.date_input("As-of date", value=date.today())
     generate_btn = st.button("Start Generation", type="primary")
     
     st.divider()
-    if st.button("Clear History"):
-        st.session_state["last_out"] = None
-        st.session_state["logs"] = []
-        st.session_state["interrupted"] = False
-        st.session_state["pipeline_config"] = None
-        get_blog_app.clear()  # Reset MemorySaver so next run starts fresh
-        st.rerun()
 
     # --- Publish to Feather Feable (HITL) ---
     if st.session_state["interrupted"]:
         st.divider()
-        st.header("📤 Publish Blog")
-        st.write("Blog generated! Publish to **Feather Feable**?")
 
-        publish_choice = st.radio(
-            "Publish to Feather Feable?",
-            ["Yes", "No"],
-            index=1,
-            key="publish_choice",
-        )
+        # Styled publish card
+        st.markdown("""
+            <div style="
+                background: linear-gradient(135deg, #1e3a5f 0%, #2d5986 100%);
+                border-radius: 12px;
+                padding: 20px;
+                margin-bottom: 16px;
+                border: 1px solid #3d7ab5;
+            ">
+                <h3 style="color: #ffffff; margin: 0 0 6px 0; font-size: 18px;">
+                    📤 Publish to Feather Feable
+                </h3>
+                <p style="color: #b0c4de; margin: 0; font-size: 13px;">
+                    Your blog is ready! Choose whether to publish it as a draft.
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
 
-        if publish_choice == "Yes":
+        # Success indicator
+        st.success("Blog generation complete!", icon="✅")
+
+        publish_choice = st.toggle("Publish to Feather Feable", value=False, key="publish_choice")
+
+        if publish_choice:
+            st.markdown("""
+                <div style="
+                    background-color: #0e1117;
+                    border: 1px solid #3d7ab5;
+                    border-radius: 8px;
+                    padding: 14px;
+                    margin-bottom: 12px;
+                ">
+                    <p style="color: #b0c4de; margin: 0 0 4px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">
+                        🔑 Authentication
+                    </p>
+                    <p style="color: #808b96; margin: 0; font-size: 11px;">
+                        Paste your Feather Feable access token below
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
+
             access_token = st.text_input(
-                "Enter your Feather Feable access token:",
+                "Access Token",
                 type="password",
                 key="ff_access_token",
+                label_visibility="collapsed",
+                placeholder="Paste your access token here...",
             )
-            if st.button("🚀 Publish Now", type="primary"):
+
+            col_pub, col_skip = st.columns(2)
+            with col_pub:
+                publish_clicked = st.button("🚀 Publish", type="primary", use_container_width=True)
+            with col_skip:
+                skip_clicked = st.button("⏭️ Skip", use_container_width=True)
+
+            if publish_clicked:
                 if access_token.strip():
                     async def resume_publish():
                         cfg = st.session_state["pipeline_config"]
@@ -124,8 +155,26 @@ with st.sidebar:
                     st.rerun()
                 else:
                     st.warning("Please enter your access token.")
+
+            if skip_clicked:
+                async def resume_skip():
+                    cfg = st.session_state["pipeline_config"]
+                    async for event in get_blog_app().astream(
+                        Command(resume={"approved": False}),
+                        config=cfg,
+                        stream_mode="updates",
+                    ):
+                        for node_name, state_update in event.items():
+                            if isinstance(state_update, dict) and st.session_state["last_out"]:
+                                st.session_state["last_out"].update(state_update)
+                    st.session_state["interrupted"] = False
+
+                asyncio.run(resume_skip())
+                st.rerun()
+
         else:
-            if st.button("⏭️ Skip & Finish"):
+            st.info("Toggle the switch above to publish, or skip to finish.", icon="💡")
+            if st.button("⏭️ Skip & Finish", use_container_width=True):
                 async def resume_skip():
                     cfg = st.session_state["pipeline_config"]
                     async for event in get_blog_app().astream(

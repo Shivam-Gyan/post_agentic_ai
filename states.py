@@ -44,12 +44,51 @@ class ResearchSchema(BaseModel):
 
     require_research: bool = Field(description="Whether additional research is needed to fill in gaps in the blog description", default=False)
     research_mode : Literal["closed_book",'hybrid', "open_book"] = Field(description="If research is needed, whether to use a closed-book approach (rely on model's existing knowledge) or open-book approach (use external sources) or hybrid approach (combine both).", default="closed_book")
-    research_queries: Annotated[List[str], Field(description="If open-book or hybrid research mode is selected, a list of specific queries to use for retrieving information from external sources")] = []
+    research_queries: Annotated[List[str], Field(description="If open-book or hybrid research mode is selected, a list of specific queries to use for retrieving information from external sources", default_factory=list)] 
     blog_kind:Literal["explainer",'tutorial','news_roundup','comparison','system_design'] = Field(description="The kind of blog the user wants to create", default="explainer")
 
+#  conversation Memory summarystate 
+class SummaryStructuredOutputSchema(BaseModel):
+    user_goal: Optional[str]
+    audience: Optional[str]
+    constraints: Annotated[List[str], Field(description="A list of constraints provided by the user", default_factory=list)] 
+    preferences: Annotated[List[str], Field(description="A list of preferences provided by the user", default_factory=list)] 
+    decisions_made: Annotated[List[str], Field(description="A list of decisions made during the conversation", default_factory=list)]
+    open_questions: Annotated[List[str], Field(description="A list of open questions that need to be addressed", default_factory=list)]
+
+# cnonversation State to keep track of the conversation history and the structured summary memory
+class ConversationState(BaseModel):
+    summary:SummaryStructuredOutputSchema = Field(description="A structured summary of the conversation history, including user goals, audience, constraints, preferences, decisions made, and open questions.")
+    messages: Annotated[List[str], Field(description="A list of messages in the conversation history",default_factory=list), operator.add]   
+
+# LLm use this to generate feedback for refining the blog based on the user query 
+class FeedbackStructuredOutputSchema(BaseModel):
+    feedback: str = Field(description="Feedback for refining the blog based on the user query and the current version of the blog")
+
+# refinment state to keep track of the refinement history and the current plan and evidence
+class RefinementState(BaseModel):
+    history: Annotated[List[str], Field(description="A list of blog posts in the refinement history", default_factory=list), operator.add]
+    # in refinement subgraph their is a structuredparse node wich use user_query and final_blog to generate a feedback for blog updation 
+    # and it sent to refine node which refine the blog based on the feedback and generate a new blog and update the hsitory and feedback List
+    feedback: Annotated[List[str], Field(description="A list of feedback provided during the refinement process", default_factory=list), operator.add]
+
+
+# intent mode detection structured output schema 
+class IntentModeStructuredOutputSchema(BaseModel):
+    mode: Literal["generate", "refine", "chat", "publish"] = Field(description="The mode of operation based on the user query, which can be 'generate' for generating a new blog, 'refine' for refining an existing blog, 'chat' for having a conversation with the user, or 'publish' for publishing the blog to an external platform.")
 
 class BlogState(BaseModel):
-    blog_description: str = Field(description="A detailed description of the blog topic provided by user", default="")
+
+    # this two below and are used for user_query and determine the mdoe user want like geernate a blog, refine previous blog or just have conversation
+    user_query: str = Field(description="A detailed description of the blog topic provided by user", default="")
+    mode: Literal["generate", "refine", "chat", "publish"] = "generate"
+
+    # conversatio state to keep track of the conversation history and the structured summary memory
+    conversation_state: ConversationState = Field(description="The state of the conversation including the structured summarymemory and the conversation history", default_factory=lambda: ConversationState(summary=SummaryStructuredOutputSchema(user_goal=None, audience=None, constraints=[], preferences=[], decisions_made=[], open_questions=[]), messages=[]))
+
+    # refine state to keep track of the refinement history and the current plan and evidence
+    refinement: RefinementState = Field(description="The state of the refinement process including the refinement history and the current plan and evidence", default_factory=lambda: RefinementState(history=[], feedback=[]))
+
 
     blog_title: str = Field(description="The main topic of the blog provided by user", default="")
     blog_topic : str = Field(description="The main topic of the blog provided by user", default="")
@@ -61,7 +100,7 @@ class BlogState(BaseModel):
     blog_kind:Literal["explainer",'tutorial','news_roundup','comparison','system_design'] = Field(description="The kind of blog the user wants to create", default="explainer")
 
     plan : PlanSchema = Field(description="The plan for the blog including tasks", default_factory=lambda: PlanSchema(blog_title="", tasks=[]))  
-    evidence: List[EvidenceSchema] = Field(description="The evidence retrieved from research to fill in the gaps in blog description", default=[])  
+    evidence: List[EvidenceSchema] = Field(description="The evidence retrieved from research to fill in the gaps in blog description", default_factory=list)  
     sections: Annotated[List[str], Field(description="A list of sections for the blog"), operator.add] = []
 
     final_blog : str = Field(description="The completed blog post", default="")

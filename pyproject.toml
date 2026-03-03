@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "beanie>=2.0.1",
     "dotenv>=0.9.9",
     "httpx>=0.27.0",
     "langchain>=1.2.8",
@@ -14,5 +15,6 @@ dependencies = [
     "langchain-ollama>=1.0.1",
     "langchain-tavily>=0.2.17",
     "langgraph>=1.0.7",
+    "motor>=3.7.1",
     "streamlit>=1.54.0",
 ]

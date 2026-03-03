@@ -40,11 +40,12 @@ def normalize_tavily_results(results: List[Dict]) -> List[Dict]:
     normalized = []
 
     for r in results:
+        content = r.get("content") or ""
         normalized.append({
             "title": r.get("title"),
-            "content": r.get("content"),
+            "content": content[:300],  # Truncate to prevent Groq function-calling failures
             "url": r.get("url"),
-        })
+        })  
 
     return normalized
 
@@ -52,3 +53,21 @@ def normalize_tavily_results(results: List[Dict]) -> List[Dict]:
 # if __name__ == "__main__":
 #     research_results = asyncio.run(perform_research("Oracle trending news"))
 #     print(research_results)
+
+
+# parser mode 
+
+def parse_mode(user_input: str):
+    if ":" not in user_input:
+        return None, user_input
+
+    prefix, content = user_input.split(":", 1)
+    prefix = prefix.strip().lower()
+    content = content.strip()
+
+    allowed_modes = {"chat", "generate", "refine", "publish"}
+
+    if prefix in allowed_modes:
+        return prefix, content
+
+    return None, user_input

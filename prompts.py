@@ -4,6 +4,43 @@ from states import EvidencePackSchema, EvidenceSchema, PlanSchema, TaskSchema
 from langchain_core.messages import SystemMessage, HumanMessage
 
 
+# prompt to detect intent mode from user query
+def get_intent_detection_prompt(user_query: str) -> list:
+    return [
+        SystemMessage(
+            content=(
+                "You are an intent classifier. Classify the user query into exactly one mode.\n\n"
+                "MODES:\n"
+                "  generate — User wants a NEW blog written. Trigger: any topic/subject the user supplies for content creation.\n"
+                "  refine   — User wants to EDIT/IMPROVE an EXISTING blog. Trigger: references to changing, shortening, expanding, or restyling current content.\n"
+                "  chat     — User is greeting, asking questions, or making conversation unrelated to blog creation/editing.\n"
+                "  publish  — User wants to publish, export, or save the blog. Trigger: words like publish, export, deploy, save, download.\n\n"
+                "DECISION PRIORITY (apply top-to-bottom, first match wins):\n"
+                "  1. Contains publish/export/save/deploy intent → publish\n"
+                "  2. References changing existing blog (e.g. 'make it shorter', 'add examples', 'rewrite intro', 'change tone') → refine\n"
+                "  3. Supplies a TOPIC or asks to write/create/generate content (e.g. 'blog about X', 'write on Y', 'AI trends', 'semiconductor advances') → generate\n"
+                "  4. Everything else (greetings, questions, vague/short input with no topic) → chat\n\n"
+                "FEW-SHOT EXAMPLES:\n"
+                "  'hi' → chat\n"
+                "  'hello, how are you?' → chat\n"
+                "  'what can you do?' → chat\n"
+                "  'thanks' → chat\n"
+                "  'write a blog about AI trends in 2026' → generate\n"
+                "  'semiconductor chip design' → generate\n"
+                "  'I want a tutorial on LangGraph' → generate\n"
+                "  'climate change impact on agriculture' → generate\n"
+                "  'make the tone more formal' → refine\n"
+                "  'add a code example to section 3' → refine\n"
+                "  'shorten the conclusion' → refine\n"
+                "  'publish it' → publish\n"
+                "  'export as markdown' → publish\n\n"
+                "Return ONLY the mode value via the function call. No reasoning."
+            )
+        ),
+        HumanMessage(content=user_query),
+    ]
+
+
 # prompt to extract details from the initial blog description provided by user
 def get_router_prompt(blog_description: str) -> list:
     return [
@@ -46,68 +83,6 @@ def get_router_prompt(blog_description: str) -> list:
             )
         ),
     ]
-
-# planning Prompt
-# def get_blog_planning_prompt(
-#     topic: str,
-#     description: str,
-#     audience: str,
-#     tone: str,
-#     evidence: List[EvidenceSchema]
-# ) -> list:
-    
-#     evidence_dict= [e.model_dump() for e in evidence]
-
-#     return [
-#         SystemMessage(
-#             content=(
-#                 "You are a professional blog strategist and audience advocate.\n"
-#                 "Your task is to create a clear, structured plan for a blog post.\n\n"
-
-#                 "CORE PRINCIPLE:\n"
-#                 "- Adapt depth, vocabulary, and examples based on the provided audience and tone.\n"
-#                 "- Do NOT assume the topic is technical unless explicitly indicated.\n"
-#                 "- The plan must feel natural for the topic domain (technical, business, lifestyle, etc.).\n\n"
-
-#                 "EVIDENCE USAGE RULES:\n"
-#                 "- You are provided with curated evidence derived from web research.\n"
-#                 "- Use evidence to guide section emphasis and practical relevance.\n"
-#                 "- Do NOT quote evidence verbatim.\n"
-#                 "- Do NOT invent facts beyond the evidence.\n"
-#                 "- If evidence is weak or speculative, deprioritize it.\n\n"
-
-#                 "HARD REQUIREMENTS:\n"
-#                 "- Create 5–7 sections total.\n"
-#                 "- Exactly ONE section must be 'common_mistakes'.\n"
-#                 "- Section IDs must start at 1 and be sequential.\n"
-#                 "- Each section must follow TaskSchema exactly.\n\n"
-#                 "- Section types MUST be one of:\n"
-#                 "- intro, core, examples, checklist, common_mistakes, conclusion\n"
-#                 "- Do NOT invent new section_type values.\n"
-#                 "- Use \"examples\" for application-oriented or practical sections.\n"
-
-#                 "QUALITY RULES:\n"
-#                 "- Sections must logically progress from introduction → core ideas → application → conclusion.\n"
-#                 "- Bullets must be concrete and useful for the target audience.\n"
-#                 "- Adjust complexity to audience expertise level.\n"
-#                 "- Include examples, tips, or practical guidance when appropriate.\n\n"
-
-#                 "Output rules:\n"
-#                 "- Output ONLY valid JSON matching PlanSchema.\n"
-#                 "- No markdown, comments, or explanations."
-#             )
-#         ),
-#         HumanMessage(
-#             content=(
-#                 f"Blog topic:\n{topic}\n\n"
-#                 f"Blog description:\n{description}\n\n"
-#                 f"Target audience:\n{audience}\n\n"
-#                 f"Writing tone:\n{tone}\n\n"
-#                 f"Evidence from research (if any):\n"
-#                 f"Available evidence from research:\n{evidence_dict}"
-#             )
-#         ),
-#     ]
 
 def get_blog_planning_prompt(
     topic: str,
@@ -158,82 +133,6 @@ def get_blog_planning_prompt(
     ]
 
 
-# worker prompt to generate each section of the blog as per task in plan
-# def worker_prompt(
-#     task: TaskSchema,
-#     blog_topic: str,
-#     plan: PlanSchema,
-#     audience: str,
-#     tone: str,
-#     evidence: List[EvidenceSchema],
-# ) -> list:
-
-#     bullets_text = "\n".join(f"- {b}" for b in task.bullets)
-
-#     evidence_text = ""
-#     if evidence:
-#         evidence_text = "\n".join(
-#             f"- {e.title}: {e.url}"
-#             for e in evidence[:6]
-#         )
-
-#     return [
-#         SystemMessage(
-#             content=(
-#                 "You are a professional blog writer skilled at adapting to any domain and audience.\n"
-#                 "Write EXACTLY ONE section of the blog.\n\n"
-
-#                 "OUTPUT FORMAT (MANDATORY):\n"
-#                 "- The response MUST be valid Markdown.\n"
-#                 "- The response MUST be suitable for saving directly as a `.md` file.\n"
-#                 "- Output ONLY the section content.\n"
-#                 "- Do NOT include explanations, comments, or chat-style text.\n\n"
-
-#                 "EVIDENCE USAGE RULES:\n"
-#                 "- You are provided with external evidence derived from web research.\n"
-#                 "- You MAY use evidence to ground context, emphasis, or examples when relevant.\n"
-#                 "- When evidence is used, reference it INLINE using natural language.\n"
-#                 "- Example formats:\n"
-#                 "  - (recent South Pole Telescope observations)\n"
-#                 "  - (MIT cosmology research)\n"
-#                 "  - (neutrino studies in 2024)\n"
-#                 "- ADD this url from evidence like this [South Pole Telescope](https://news.uchicago.edu/story/latest-data-south-pole-telescope...) if evidence is correct and provided"
-#                 "- Do NOT invent facts, numbers, institutions, dates, or findings.\n"
-#                 "- If evidence is not relevant to the section goal, ignore it completely.\n\n"
-
-#                 "CONTENT RULES:\n"
-#                 "- Follow the Goal exactly.\n"
-#                 "- Cover ALL bullets in the given order.\n"
-#                 "- Stay within ±15% of the target word count.\n"
-#                 "- Prefer explanations, metaphors, and implications over raw facts.\n"
-#                 "- Mention trade-offs or uncertainties only when they naturally fit the topic.\n\n"
-
-#                 "STYLE RULES:\n"
-#                 "- Start with: ## <Section Title>\n"
-#                 "- Use short paragraphs and lists where helpful.\n"
-#                 "- Avoid fluff, repetition, meta commentary, or explicit citations."
-#             )
-
-#         ),
-#         HumanMessage(
-#             content=(
-#                 f"Blog title: {plan.blog_title}\n"
-#                 f"Audience: {audience}\n"
-#                 f"Tone: {tone}\n"
-#                 f"Topic: {blog_topic}\n\n"
-
-#                 f"Section title: {task.title}\n"
-#                 f"Section type: {task.section_type}\n"
-#                 f"Goal: {task.goal}\n"
-#                 f"Target words: {task.target_words}\n\n"
-
-#                 f"Bullets to cover:\n{bullets_text}\n\n"
-#                 f"Available evidence (use selectively):\n{evidence_text}"
-#             )
-#         ),
-#     ]
-
-
 def worker_prompt(
     task: TaskSchema,
     blog_topic: str,
@@ -246,7 +145,7 @@ def worker_prompt(
     bullets_text = "\n".join(f"- {b}" for b in task.bullets)
     
     # Create a simple outline so the worker knows the full story
-    outline = "\n".join([f"{t.id}. {t.title}" for t in plan.tasks])
+    outline = "\n".join([f"{t.id}. {t.title}, {t.goal}" for t in plan.tasks])
 
     # Improved evidence formatting: Include the content/snippet, not just the URL
     # A worker can't cite what it can't read!
@@ -295,8 +194,44 @@ def worker_prompt(
         ),
     ]
 
+# prompt to generate structured feedback from user refinement query and the current blog
+def get_feedback_prompt(user_query: str, final_blog: str,prev_feedback: str) -> list:
+    # Truncate blog to last ~3000 chars to stay within context limits on large posts
+    blog_snippet = final_blog if len(final_blog) <= 4000 else final_blog[:1500] + "\n\n[...middle truncated...]\n\n" + final_blog[-1500:]
+    return [
+        SystemMessage(
+            content=(
+                "You are a Professional Blog Editor.\n\n"
+                "Given:\n"
+                "1) The user's change request\n"
+                "2) The current blog draft\n"
+                "3) Previous feedback\n\n"
+                "Generate ONE precise, actionable editorial instruction.\n\n"
+                "RULES:\n"
+                "1. Clearly identify the TARGET SECTION by exact heading as written in the blog.\n"
+                "2. Specify the ACTION using strong verbs: rewrite, expand, condense, restructure, add example, add data, change tone, improve transition, etc.\n"
+                "3. Provide a one-line REASON tied directly to the user's request.\n"
+                "4. If the user request is vague, choose the highest-impact editorial improvement (clarity, structure, depth, SEO alignment, flow).\n"
+                "5. Do NOT rewrite the blog.\n"
+                "6. Keep under 150 words.\n"
+                "7. If SEO improvement is needed, specify whether to:\n"
+                "   - optimize keyword usage\n"
+                "   - improve heading hierarchy\n"
+                "   - strengthen search intent alignment\n"
+                "   - improve meta-description style opening\n\n"
+                "Return ONLY the feedback text via function call. No explanation."
+            )
+        ),
+        HumanMessage(
+            content=(
+                f"USER REQUEST: {user_query}\n\n"
+                f"CURRENT BLOG:\n{blog_snippet}"
+                f"\n\nPREVIOUS FEEDBACK:\n{prev_feedback}"
+            )
+        ),
+    ]
 
-# prmopt to give structured evidence List from raw result_list_dict
+
 def get_evidence_research_prompt(raw_result: List[dict]) -> list:
     return [
         SystemMessage(
