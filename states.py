@@ -1,3 +1,5 @@
+from langchain_core.messages import BaseMessage
+from langgraph.graph import add_messages
 from pydantic import BaseModel, Field
 from typing import Literal, Annotated,List,Optional
 import operator
@@ -58,8 +60,17 @@ class SummaryStructuredOutputSchema(BaseModel):
 
 # cnonversation State to keep track of the conversation history and the structured summary memory
 class ConversationState(BaseModel):
-    summary:SummaryStructuredOutputSchema = Field(description="A structured summary of the conversation history, including user goals, audience, constraints, preferences, decisions made, and open questions.")
-    messages: Annotated[List[str], Field(description="A list of messages in the conversation history",default_factory=list), operator.add]   
+    summary: SummaryStructuredOutputSchema = Field(
+        default_factory=lambda: SummaryStructuredOutputSchema(
+            user_goal=None,
+            audience=None,
+            constraints=[],
+            preferences=[],
+            decisions_made=[],
+            open_questions=[]
+        )
+    )
+      
 
 # LLm use this to generate feedback for refining the blog based on the user query 
 # class FeedbackStructuredOutputSchema(BaseModel):
@@ -102,7 +113,18 @@ class BlogState(BaseModel):
     mode: Literal["generate", "refine", "chat", "publish"] = "generate"
 
     # conversatio state to keep track of the conversation history and the structured summary memory
-    conversation_state: ConversationState = Field(description="The state of the conversation including the structured summarymemory and the conversation history", default_factory=lambda: ConversationState(summary=SummaryStructuredOutputSchema(user_goal=None, audience=None, constraints=[], preferences=[], decisions_made=[], open_questions=[]), messages=[]))
+    messages: Annotated[List[BaseMessage], Field(description="A list of messages in the conversation history",default_factory=list),add_messages]
+    summary: SummaryStructuredOutputSchema = Field(
+        default_factory=lambda: SummaryStructuredOutputSchema(
+            user_goal=None,
+            audience=None,
+            constraints=[],
+            preferences=[],
+            decisions_made=[],
+            open_questions=[]
+        )
+    )
+
 
     # refine state to keep track of the refinement history and the current plan and evidence
     refinement: RefinementState = Field(description="The state of the refinement process including the refinement history and the current plan and evidence", default_factory=lambda: RefinementState(history=[], feedback=[]))

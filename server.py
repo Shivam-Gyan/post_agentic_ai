@@ -2,10 +2,11 @@
 import asyncio
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
+from node.conversation_nodes import chat_node_func
 from node.generate_nodes import router_node,research_node, router_condition_func, fanout, orchestrator, reducer, worker, publish_node
 from node.refinement_nodes import refine_node_func, refine_structured_output_model
 from node.intent_detection_nodes import intent_detection_node, intent_router_func
-from states import BlogState
+from states import BlogState, ConversationState, SummaryStructuredOutputSchema
 
 # refinement subgraph to handle the refinement 
 def build_refine_subgraph():
@@ -21,15 +22,25 @@ def build_refine_subgraph():
     g.set_entry_point('refine_structured_output_node')
     g.add_edge('refine_node',END)
 
-    # compiling the subgraph
-    cp = MemorySaver()
-    return g.compile(checkpointer=cp)
+    # No separate checkpointer — the parent graph's MemorySaver handles
+    # state persistence so refinement history carries over between turns.
+    return g.compile()# conversation subgraph to handle the conversation 
 
 
-# conversation subgraph to handle the conversation 
+
 def build_conversation_subgraph():
-    #logic here 
-    pass
+    g = StateGraph(BlogState)
+
+    # define the nodes for conversation subgraph
+    g.add_node('chat_node', chat_node_func)
+
+    # define the edges for conversation subgraph
+    g.add_edge(START,'chat_node')
+    g.add_edge('chat_node',END)
+    
+    # No separate checkpointer — the parent graph's MemorySaver handles
+    # state persistence so AIMessages carry over between turns.
+    return g.compile()
 
 
 # main graph of Agentic AI Blog Generator
@@ -39,14 +50,14 @@ def build_blog_graph():
     and keep the MemorySaver alive across reruns / file-watcher reloads."""
 
     refine_subgraph = build_refine_subgraph()
-
+    conversation_subgraph = build_conversation_subgraph()
     # 1. initialize the state graph
     g = StateGraph(BlogState)
 
     # 2. define the nodes
     g.add_node('intent_node', intent_detection_node)
     g.add_node('refine_subgraph', refine_subgraph)
-    # g.add_node('orchestrator', orchestrator)
+    g.add_node('conversation_subgraph', conversation_subgraph)
     # g.add_node('worker', worker) #type: ignore
     # g.add_node('reducer',reducer)
     # g.add_node('research_node', research_node)
@@ -57,6 +68,7 @@ def build_blog_graph():
     g.add_edge(START,'intent_node')
     g.add_conditional_edges('intent_node', intent_router_func) #type: ignore
     g.add_edge('refine_subgraph',END)
+    g.add_edge('conversation_subgraph',END)
     # g.add_edge('intent_node',END)
     # g.add_edge('refine_structured_output_node',END)
     # g.add_edge(START,'router_node')
@@ -74,18 +86,9 @@ def build_blog_graph():
 # Default module-level instance (used when running without Streamlit)
 blog_agentic_ai = build_blog_graph()
 
-
-
 async def main():
     print("\n----------- Agentic AI Blog Generator ----------\n")
-
-    user_input= input("Please enter the blog description: ")
-    print(f"\nUser : {user_input}\n")
-
-    initial_state = BlogState(
-        user_query=user_input,
-        # blog_topic="Discovery of rocket science and its impact on modern space exploration"
-    )
+    print("Type 'exit' or 'quit' to stop.\n")
 
     config = {
         "configurable": {
@@ -93,21 +96,74 @@ async def main():
         }
     }
 
+    initial_state = BlogState(
+        user_query="",
+        mode="generate",
+        messages=[],
+        summary=SummaryStructuredOutputSchema(
+            user_goal=None,
+            audience=None,
+            constraints=[],
+            preferences=[],
+            decisions_made=[],
+            open_questions=[]
+        )
+    )
+    while True:
+        try:
+            user_input = input("You: ").strip()
+
+            if not user_input:
+                continue
+
+            if user_input.lower() in ("exit", "quit"):
+                print("\n👋 Goodbye!\n")
+                break
+
+            print()
+
+            # Only send the new user_query. The checkpoint (MemorySaver)
+            # preserves all accumulated state (messages, blog, plan, etc.)
+            # between turns. The intent_detection_node will append the
+            # HumanMessage to conversation_state.messages via operator.add.
+            initial_state.user_query = user_input
+
+            final_state = await blog_agentic_ai.ainvoke(
+                initial_state,
+                config=config
+            )
+
+            print(blog_agentic_ai.get_state(config=config).values['messages'])
+
+            mode = final_state["mode"]
+            print(f"[Mode: {mode}]\n")
+
+            if mode == "chat":
+                messages = final_state["messages"]
+                if messages:
+                    print(f"Assistant: {messages[-1].content}\n")
+
+            elif mode in ("generate", "refine"):
+                blog = final_state.get("final_blog", "")
+                if blog:
+                    print(f"📝 Blog:\n\n{blog}\n")
+                else:
+                    print("⚠️  No blog generated yet.\n")
+
+            elif mode == "publish":
+                result = final_state.get("publish_result", "")
+                print(f"🚀 Publish result: {result}\n")
+
+        except KeyboardInterrupt:
+            print("\n\n⚠️ Interrupted.")
+            break
+
+        except Exception as e:
+            print(f"\n❌ An error occurred: {e}\n")
 
 
-    try:
-        # 🔥 Async call (graph runs here)
-        final_state = await blog_agentic_ai.ainvoke(initial_state, config=config)  # type: ignore
 
-        print("\n\nFinal Blog Output:\n\n")
-        # print(final_state["refinement"])
-        print(final_state["mode"])
-        print(final_state["user_query"])
-        print(final_state["final_blog"])
-        # print(final_state)
 
-    except Exception as e:
-        print(f"\n❌ An error occurred: {e}")
 
 if __name__ == "__main__":
     try:
