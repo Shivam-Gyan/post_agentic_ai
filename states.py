@@ -62,15 +62,33 @@ class ConversationState(BaseModel):
     messages: Annotated[List[str], Field(description="A list of messages in the conversation history",default_factory=list), operator.add]   
 
 # LLm use this to generate feedback for refining the blog based on the user query 
+# class FeedbackStructuredOutputSchema(BaseModel):
+#     feedback: str = Field(description="Feedback for refining the blog based on the user query and the current version of the blog")
+
 class FeedbackStructuredOutputSchema(BaseModel):
-    feedback: str = Field(description="Feedback for refining the blog based on the user query and the current version of the blog")
+    target_section: Optional[str] = None
+    action: str
+    reason: str
+
+    tone_delta: Optional[str] = None
+    audience_delta: Optional[str] = None
+    depth_adjustment: Optional[Literal["increase", "decrease", "same"]] = "same"
+
+    seo_focus: Optional[
+        Literal[
+            "keyword_optimization",
+            "heading_structure",
+            "search_intent_alignment",
+            "meta_description_improvement"
+        ]
+    ] = None
 
 # refinment state to keep track of the refinement history and the current plan and evidence
 class RefinementState(BaseModel):
     history: Annotated[List[str], Field(description="A list of blog posts in the refinement history", default_factory=list), operator.add]
     # in refinement subgraph their is a structuredparse node wich use user_query and final_blog to generate a feedback for blog updation 
     # and it sent to refine node which refine the blog based on the feedback and generate a new blog and update the hsitory and feedback List
-    feedback: Annotated[List[str], Field(description="A list of feedback provided during the refinement process", default_factory=list), operator.add]
+    feedback: Annotated[List[FeedbackStructuredOutputSchema], Field(description="A list of feedback provided during the refinement process", default_factory=list), operator.add]
 
 
 # intent mode detection structured output schema 

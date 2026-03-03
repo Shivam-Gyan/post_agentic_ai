@@ -1,44 +1,7 @@
 from typing import List
 from langchain_core.messages import SystemMessage, HumanMessage
-from states import EvidencePackSchema, EvidenceSchema, PlanSchema, TaskSchema
-from langchain_core.messages import SystemMessage, HumanMessage
+from states import  EvidenceSchema, PlanSchema, TaskSchema
 
-
-# prompt to detect intent mode from user query
-def get_intent_detection_prompt(user_query: str) -> list:
-    return [
-        SystemMessage(
-            content=(
-                "You are an intent classifier. Classify the user query into exactly one mode.\n\n"
-                "MODES:\n"
-                "  generate — User wants a NEW blog written. Trigger: any topic/subject the user supplies for content creation.\n"
-                "  refine   — User wants to EDIT/IMPROVE an EXISTING blog. Trigger: references to changing, shortening, expanding, or restyling current content.\n"
-                "  chat     — User is greeting, asking questions, or making conversation unrelated to blog creation/editing.\n"
-                "  publish  — User wants to publish, export, or save the blog. Trigger: words like publish, export, deploy, save, download.\n\n"
-                "DECISION PRIORITY (apply top-to-bottom, first match wins):\n"
-                "  1. Contains publish/export/save/deploy intent → publish\n"
-                "  2. References changing existing blog (e.g. 'make it shorter', 'add examples', 'rewrite intro', 'change tone') → refine\n"
-                "  3. Supplies a TOPIC or asks to write/create/generate content (e.g. 'blog about X', 'write on Y', 'AI trends', 'semiconductor advances') → generate\n"
-                "  4. Everything else (greetings, questions, vague/short input with no topic) → chat\n\n"
-                "FEW-SHOT EXAMPLES:\n"
-                "  'hi' → chat\n"
-                "  'hello, how are you?' → chat\n"
-                "  'what can you do?' → chat\n"
-                "  'thanks' → chat\n"
-                "  'write a blog about AI trends in 2026' → generate\n"
-                "  'semiconductor chip design' → generate\n"
-                "  'I want a tutorial on LangGraph' → generate\n"
-                "  'climate change impact on agriculture' → generate\n"
-                "  'make the tone more formal' → refine\n"
-                "  'add a code example to section 3' → refine\n"
-                "  'shorten the conclusion' → refine\n"
-                "  'publish it' → publish\n"
-                "  'export as markdown' → publish\n\n"
-                "Return ONLY the mode value via the function call. No reasoning."
-            )
-        ),
-        HumanMessage(content=user_query),
-    ]
 
 
 # prompt to extract details from the initial blog description provided by user
@@ -190,43 +153,6 @@ def worker_prompt(
             content=(
                 f"Topic: {blog_topic}\n\n"
                 f"Research Evidence to include:\n{evidence_text}"
-            )
-        ),
-    ]
-
-# prompt to generate structured feedback from user refinement query and the current blog
-def get_feedback_prompt(user_query: str, final_blog: str,prev_feedback: str) -> list:
-    # Truncate blog to last ~3000 chars to stay within context limits on large posts
-    blog_snippet = final_blog if len(final_blog) <= 4000 else final_blog[:1500] + "\n\n[...middle truncated...]\n\n" + final_blog[-1500:]
-    return [
-        SystemMessage(
-            content=(
-                "You are a Professional Blog Editor.\n\n"
-                "Given:\n"
-                "1) The user's change request\n"
-                "2) The current blog draft\n"
-                "3) Previous feedback\n\n"
-                "Generate ONE precise, actionable editorial instruction.\n\n"
-                "RULES:\n"
-                "1. Clearly identify the TARGET SECTION by exact heading as written in the blog.\n"
-                "2. Specify the ACTION using strong verbs: rewrite, expand, condense, restructure, add example, add data, change tone, improve transition, etc.\n"
-                "3. Provide a one-line REASON tied directly to the user's request.\n"
-                "4. If the user request is vague, choose the highest-impact editorial improvement (clarity, structure, depth, SEO alignment, flow).\n"
-                "5. Do NOT rewrite the blog.\n"
-                "6. Keep under 150 words.\n"
-                "7. If SEO improvement is needed, specify whether to:\n"
-                "   - optimize keyword usage\n"
-                "   - improve heading hierarchy\n"
-                "   - strengthen search intent alignment\n"
-                "   - improve meta-description style opening\n\n"
-                "Return ONLY the feedback text via function call. No explanation."
-            )
-        ),
-        HumanMessage(
-            content=(
-                f"USER REQUEST: {user_query}\n\n"
-                f"CURRENT BLOG:\n{blog_snippet}"
-                f"\n\nPREVIOUS FEEDBACK:\n{prev_feedback}"
             )
         ),
     ]

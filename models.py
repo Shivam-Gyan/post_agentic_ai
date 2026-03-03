@@ -19,7 +19,7 @@ structure_model = ChatGroq(
 
 # intent mode detetcion model
 
-intent_structured_output_model = structure_model.with_structured_output(IntentModeStructuredOutputSchema, method="function_calling")
+# intent_structured_output_model = structure_model.with_structured_output(IntentModeStructuredOutputSchema, method="function_calling")
 
 # refine feedback structured output model
 refine_feedback_output_model = structure_model.with_structured_output(FeedbackStructuredOutputSchema, method="function_calling")
