@@ -14,7 +14,7 @@ from states import BlogState        # Your Pydantic State
 # Cache the compiled graph so MemorySaver survives Streamlit reruns / file-watcher reloads
 @st.cache_resource
 def get_blog_app():
-    from server import build_blog_graph
+    from agent import build_blog_graph
     return build_blog_graph()
 
 
