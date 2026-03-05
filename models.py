@@ -1,5 +1,5 @@
 from langchain_ollama import ChatOllama
-from states import EvidencePackSchema, IntentModeStructuredOutputSchema, ResearchSchema, PlanSchema, FeedbackStructuredOutputSchema
+from states import EvidencePackSchema, IntentModeStructuredOutputSchema, ResearchSchema, PlanSchema, FeedbackStructuredOutputSchema, SummaryStructuredOutputSchema
 import itertools
 from langchain_groq import ChatGroq
 from dotenv import load_dotenv
@@ -16,10 +16,14 @@ structure_model = ChatGroq(
     api_key = GROQ_API_KEY, # type: ignore
     temperature = 0 # Critical for schema adherence
 ) 
+# structure_model = ChatOllama(
+#     model='qwen3:1.7b-q4_K_M',
+#     temperature = 0 # Critical for schema adherence
+# ) 
 
 # intent mode detetcion model
 
-# intent_structured_output_model = structure_model.with_structured_output(IntentModeStructuredOutputSchema, method="function_calling")
+conversation_summary_structured_output_model = structure_model.with_structured_output(SummaryStructuredOutputSchema, method="function_calling")
 
 # refine feedback structured output model
 refine_feedback_output_model = structure_model.with_structured_output(FeedbackStructuredOutputSchema, method="function_calling")
@@ -37,13 +41,20 @@ structured_output_model_research = structure_model.with_structured_output(Eviden
 
 # generation_model = ChatOllama(model='deepseek-r1:1.5b',temperature=0.4)
 
-generation_model = ChatGroq(
+# generation_model = ChatGroq(
+#     #  model="llama-3.3-70b-versatile",
+#     #  model="openai/gpt-oss-120b",
+#     model="meta-llama/llama-4-scout-17b-16e-instruct",
+#     api_key=GROQ_API_KEY, #type: ignore
+#     temperature=0.4
+# )
+generation_model = ChatOllama(
     #  model="llama-3.3-70b-versatile",
     #  model="openai/gpt-oss-120b",
-    model="meta-llama/llama-4-scout-17b-16e-instruct",
-    api_key=GROQ_API_KEY, #type: ignore
+    model="ministral-3:3b",
+    # api_key=GROQ_API_KEY, #type: ignore
     temperature=0.4
-    )
+)
 
 def get_generation_model():
     return generation_model

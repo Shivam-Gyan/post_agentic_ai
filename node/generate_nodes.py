@@ -170,8 +170,8 @@ async def worker(payload: dict) -> dict:
         if not audience or not tone:
             raise ValueError("Missing audience or tone in worker payload")
 
-        if not evidence:
-            raise ValueError("Missing evidence in worker payload")
+        # if not evidence:
+        #     raise ValueError("Missing evidence in worker payload")
 
         # ---- Build prompt for grouped tasks ----
         prompt = worker_prompt(

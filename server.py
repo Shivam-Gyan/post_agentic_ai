@@ -1,12 +1,17 @@
 
 import asyncio
+import os
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 from node.conversation_nodes import chat_node_func
 from node.generate_nodes import router_node,research_node, router_condition_func, fanout, orchestrator, reducer, worker, publish_node
 from node.refinement_nodes import refine_node_func, refine_structured_output_model
 from node.intent_detection_nodes import intent_detection_node, intent_router_func
-from states import BlogState, ConversationState, SummaryStructuredOutputSchema
+from states import BlogState
+from dotenv import load_dotenv
+load_dotenv()
+
+os.environ["LANGSMITH_PROJECT"] = os.getenv("LANGSMITH_PROJECT", "blog_agentic_ai")
 
 # refinement subgraph to handle the refinement 
 def build_refine_subgraph():
@@ -58,24 +63,24 @@ def build_blog_graph():
     g.add_node('intent_node', intent_detection_node)
     g.add_node('refine_subgraph', refine_subgraph)
     g.add_node('conversation_subgraph', conversation_subgraph)
-    # g.add_node('worker', worker) #type: ignore
-    # g.add_node('reducer',reducer)
-    # g.add_node('research_node', research_node)
-    # g.add_node('router_node', router_node)
+    g.add_node('router_node', router_node)
+    g.add_node('research_node', research_node)
+    g.add_node('orchestrator', orchestrator)
+    g.add_node('worker', worker) #type: ignore
+    g.add_node('reducer',reducer)
     # g.add_node('publish_node', publish_node)
 
     # 3. define the edges
     g.add_edge(START,'intent_node')
+    # g.add_edge('intent_node',END)
     g.add_conditional_edges('intent_node', intent_router_func) #type: ignore
     g.add_edge('refine_subgraph',END)
     g.add_edge('conversation_subgraph',END)
-    # g.add_edge('intent_node',END)
-    # g.add_edge('refine_structured_output_node',END)
-    # g.add_edge(START,'router_node')
-    # g.add_conditional_edges('router_node',router_condition_func )
-    # g.add_edge('research_node', 'orchestrator')
-    # g.add_conditional_edges('orchestrator',fanout,['worker'])
-    # g.add_edge('worker', 'reducer')
+    g.add_conditional_edges('router_node',router_condition_func )
+    g.add_edge('research_node', 'orchestrator')
+    g.add_conditional_edges('orchestrator',fanout,['worker'])
+    g.add_edge('worker', 'reducer')
+    g.add_edge('reducer', END)
     # g.add_edge('reducer', 'publish_node')
     # g.add_edge('publish_node', END)
 
@@ -96,19 +101,6 @@ async def main():
         }
     }
 
-    initial_state = BlogState(
-        user_query="",
-        mode="generate",
-        messages=[],
-        summary=SummaryStructuredOutputSchema(
-            user_goal=None,
-            audience=None,
-            constraints=[],
-            preferences=[],
-            decisions_made=[],
-            open_questions=[]
-        )
-    )
     while True:
         try:
             user_input = input("You: ").strip()
@@ -122,18 +114,17 @@ async def main():
 
             print()
 
-            # Only send the new user_query. The checkpoint (MemorySaver)
-            # preserves all accumulated state (messages, blog, plan, etc.)
-            # between turns. The intent_detection_node will append the
-            # HumanMessage to conversation_state.messages via operator.add.
-            initial_state.user_query = user_input
-
+            # Pass ONLY the fields that change per turn.
+            # Passing the full initial_state would overwrite plain (non-reducer)
+            # fields like `summary` with their blank defaults on every turn,
+            # wiping the checkpointed summary. Reducer fields like `messages`
+            # (add_messages) are safe either way, but plain fields are not.
             final_state = await blog_agentic_ai.ainvoke(
-                initial_state,
-                config=config
+                {"user_query": user_input}, # type: ignore
+                config=config  # type: ignore
             )
 
-            print(blog_agentic_ai.get_state(config=config).values['messages'])
+            # print(blog_agentic_ai.get_state(config=config).values['messages']) #type: ignore
 
             mode = final_state["mode"]
             print(f"[Mode: {mode}]\n")

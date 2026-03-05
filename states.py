@@ -49,28 +49,30 @@ class ResearchSchema(BaseModel):
     research_queries: Annotated[List[str], Field(description="If open-book or hybrid research mode is selected, a list of specific queries to use for retrieving information from external sources", default_factory=list)] 
     blog_kind:Literal["explainer",'tutorial','news_roundup','comparison','system_design'] = Field(description="The kind of blog the user wants to create", default="explainer")
 
-#  conversation Memory summarystate 
-class SummaryStructuredOutputSchema(BaseModel):
-    user_goal: Optional[str]
-    audience: Optional[str]
-    constraints: Annotated[List[str], Field(description="A list of constraints provided by the user", default_factory=list)] 
-    preferences: Annotated[List[str], Field(description="A list of preferences provided by the user", default_factory=list)] 
-    decisions_made: Annotated[List[str], Field(description="A list of decisions made during the conversation", default_factory=list)]
-    open_questions: Annotated[List[str], Field(description="A list of open questions that need to be addressed", default_factory=list)]
+# #  conversation Memory summarystate 
+# class SummaryStructuredOutputSchema(BaseModel):
+#     user_real_name: Optional[str]
+#     user_goal: Optional[str]
+#     audience: Optional[str]
+#     constraints: Annotated[List[str], Field(description="A list of constraints provided by the user", default_factory=list)] 
+#     preferences: Annotated[List[str], Field(description="A list of preferences provided by the user", default_factory=list)] 
+#     decisions_made: Annotated[List[str], Field(description="A list of decisions made during the conversation", default_factory=list)]
+#     open_questions: Annotated[List[str], Field(description="A list of open questions that need to be addressed", default_factory=list)]
 
-# cnonversation State to keep track of the conversation history and the structured summary memory
-class ConversationState(BaseModel):
-    summary: SummaryStructuredOutputSchema = Field(
-        default_factory=lambda: SummaryStructuredOutputSchema(
-            user_goal=None,
-            audience=None,
-            constraints=[],
-            preferences=[],
-            decisions_made=[],
-            open_questions=[]
-        )
-    )
-      
+class SummaryStructuredOutputSchema(BaseModel):
+    # Explicit `= None` on every Optional field is REQUIRED for Pydantic V2.
+    # Without it, the JSON schema marks these as "required", causing Groq
+    # function-calling to reject the tool call with a 400 when the LLM omits them.
+    user_real_name: Optional[str] = None
+    user_professional_bio: Optional[str] = Field(default=None, description="User's role or expertise (e.g. AI Engineer).")
+    current_topics_of_interest: List[str] = Field(default_factory=list, description="Topics discussed in chat (e.g. ML mistakes, Black Holes).")
+    user_goal: Optional[str] = None
+    audience: Optional[str] = None
+    constraints: List[str] = Field(default_factory=list)
+    preferences: List[str] = Field(default_factory=list)
+    decisions_made: List[str] = Field(default_factory=list)
+    open_questions: List[str] = Field(default_factory=list)
+
 
 # LLm use this to generate feedback for refining the blog based on the user query 
 # class FeedbackStructuredOutputSchema(BaseModel):
@@ -115,14 +117,7 @@ class BlogState(BaseModel):
     # conversatio state to keep track of the conversation history and the structured summary memory
     messages: Annotated[List[BaseMessage], Field(description="A list of messages in the conversation history",default_factory=list),add_messages]
     summary: SummaryStructuredOutputSchema = Field(
-        default_factory=lambda: SummaryStructuredOutputSchema(
-            user_goal=None,
-            audience=None,
-            constraints=[],
-            preferences=[],
-            decisions_made=[],
-            open_questions=[]
-        )
+        default_factory=SummaryStructuredOutputSchema
     )
 
 
