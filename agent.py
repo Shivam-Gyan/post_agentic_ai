@@ -92,81 +92,81 @@ def build_blog_graph():
 # Default module-level instance (used when running without Streamlit)
 blog_agentic_ai = build_blog_graph()
 
-async def main():
-    print("\n----------- Agentic AI Blog Generator ----------\n")
-    print("Type 'exit' or 'quit' to stop.\n")
+# async def main():
+#     print("\n----------- Agentic AI Blog Generator ----------\n")
+#     print("Type 'exit' or 'quit' to stop.\n")
 
-    config = {
-        "configurable": {
-            "thread_id": "blog_generation_thread",
-        }
-    }
+#     config = {
+#         "configurable": {
+#             "thread_id": "blog_generation_thread",
+#         }
+#     }
 
-    while True:
-        try:
-            user_input = input("You: ").strip()
+#     while True:
+#         try:
+#             user_input = input("You: ").strip()
 
-            if not user_input:
-                continue
+#             if not user_input:
+#                 continue
 
-            if user_input.lower() in ("exit", "quit"):
-                print("\n👋 Goodbye!\n")
-                break
+#             if user_input.lower() in ("exit", "quit"):
+#                 print("\n👋 Goodbye!\n")
+#                 break
 
-            print()
+#             print()
 
-            # Pass ONLY the fields that change per turn.
-            # Passing the full initial_state would overwrite plain (non-reducer)
-            # fields like `summary` with their blank defaults on every turn,
-            # wiping the checkpointed summary. Reducer fields like `messages`
-            # (add_messages) are safe either way, but plain fields are not.
-            final_state = await blog_agentic_ai.ainvoke(
-                {"user_query": user_input}, # type: ignore
-                config=config  # type: ignore
-            )
+#             # Pass ONLY the fields that change per turn.
+#             # Passing the full initial_state would overwrite plain (non-reducer)
+#             # fields like `summary` with their blank defaults on every turn,
+#             # wiping the checkpointed summary. Reducer fields like `messages`
+#             # (add_messages) are safe either way, but plain fields are not.
+#             final_state = await blog_agentic_ai.ainvoke(
+#                 {"user_query": user_input}, # type: ignore
+#                 config=config  # type: ignore
+#             )
 
-            # print(blog_agentic_ai.get_state(config=config).values['messages']) #type: ignore
+#             # print(blog_agentic_ai.get_state(config=config).values['messages']) #type: ignore
 
-            mode = final_state["mode"]
-            print(f"[Mode: {mode}]\n")
+#             mode = final_state["mode"]
+#             print(f"[Mode: {mode}]\n")
 
-            if mode == "guard":
-                messages = final_state["messages"]
-                if messages:
-                    print(f"Assistant: {messages[-1].content}\n")
+#             if mode == "guard":
+#                 messages = final_state["messages"]
+#                 if messages:
+#                     print(f"Assistant: {messages[-1].content}\n")
 
-            if mode == "chat":
-                messages = final_state["messages"]
-                print(f"\nConversation AI : ({messages[-1].content}):")
-                if messages:
-                    print(f"Assistant: {messages[-1].content}\n")
+#             if mode == "chat":
+#                 messages = final_state["messages"]
+#                 # print(f"\nConversation AI : ({messages[-1].content}):")
+#                 if messages:
+#                     print(f"Assistant: {messages[-1].content}\n")
 
-            elif mode in ("generate", "refine"):
-                blog = final_state.get("final_blog", "")
-                if blog:
-                    print(f"📝 Blog:\n\n{blog}\n")
-                else:
-                    print("⚠️  No blog generated yet.\n")
+#             elif mode in ("generate", "refine"):
+#                 blog = final_state.get("final_blog", "")
+#                 if blog:
+#                     print(f"📝 Blog:\n\n{blog}\n")
+#                 else:
+#                     print("⚠️  No blog generated yet.\n")
 
-            elif mode == "publish":
-                result = final_state.get("publish_result", "")
-                print(f"🚀 Publish result: {result}\n")
+#             elif mode == "publish":
+#                 result = final_state.get("publish_result", "")
+#                 print(f"🚀 Publish result: {result}\n")
 
-        except KeyboardInterrupt:
-            print("\n\n⚠️ Interrupted.")
-            break
+#         except KeyboardInterrupt:
+#             print("\n\n⚠️ Interrupted.")
+#             break
 
-        except Exception as e:
-            print(f"\n❌ An error occurred: {e}\n")
-
-
+#         except Exception as e:
+#             print(f"\n❌ An error occurred: {e}\n")
 
 
 
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n\n⚠️ Process interrupted by user.")
-    except Exception as e:
-        print(f"\n\n❌ Unexpected error: {e}")
+
+
+# if __name__ == "__main__":
+#     try:
+#         asyncio.run(main())
+#     except KeyboardInterrupt:
+#         print("\n\n⚠️ Process interrupted by user.")
+#     except Exception as e:
+#         print(f"\n\n❌ Unexpected error: {e}")
