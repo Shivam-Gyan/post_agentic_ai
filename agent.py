@@ -3,6 +3,7 @@ import asyncio
 import os
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
+from database.mongodb_checkpointer import get_checkpointer
 from node.conversation_nodes import chat_node_func
 from node.generate_nodes import router_node,research_node, router_condition_func, fanout, orchestrator, reducer, worker, publish_node
 from node.refinement_nodes import refine_node_func, refine_structured_output_model
@@ -84,8 +85,8 @@ def build_blog_graph():
     # g.add_edge('reducer', 'publish_node')
     # g.add_edge('publish_node', END)
 
-    cp = MemorySaver()
-    return g.compile(checkpointer=cp)
+    checkpointer = get_checkpointer()
+    return g.compile(checkpointer=checkpointer)
 
 
 # Default module-level instance (used when running without Streamlit)
@@ -129,8 +130,14 @@ async def main():
             mode = final_state["mode"]
             print(f"[Mode: {mode}]\n")
 
+            if mode == "guard":
+                messages = final_state["messages"]
+                if messages:
+                    print(f"Assistant: {messages[-1].content}\n")
+
             if mode == "chat":
                 messages = final_state["messages"]
+                print(f"\nConversation AI : ({messages[-1].content}):")
                 if messages:
                     print(f"Assistant: {messages[-1].content}\n")
 

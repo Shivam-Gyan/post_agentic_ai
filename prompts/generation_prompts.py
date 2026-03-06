@@ -96,6 +96,67 @@ def get_blog_planning_prompt(
     ]
 
 
+# def worker_prompt(
+#     task: TaskSchema,
+#     blog_topic: str,
+#     plan: PlanSchema,
+#     audience: str,
+#     tone: str,
+#     evidence: List[EvidenceSchema],
+# ) -> list:
+
+#     bullets_text = "\n".join(f"- {b}" for b in task.bullets)
+    
+#     # Create a simple outline so the worker knows the full story
+#     outline = "\n".join([f"{t.id}. {t.title}, {t.goal}" for t in plan.tasks])
+
+#     # Improved evidence formatting: Include the content/snippet, not just the URL
+#     # A worker can't cite what it can't read!
+#     evidence_text = "\n".join(
+#         f"SOURCE: {e.title}\nURL: {e.url}\nCONTENT: {e.content[:300]}..." #type: ignore
+#         for e in evidence[:5]
+#     )
+
+#     return [
+#         SystemMessage(
+#             content=(
+#                 "### ROLE\n"
+#                 "You are an Elite Technical Writer. Your task is to write ONE specific chapter of a comprehensive blog post. "
+#                 "You must maintain the flow of the overall narrative while strictly adhering to the assigned section's goals.\n\n"
+
+#                 "### GLOBAL BLOG CONTEXT\n"
+#                 f"**Full Blog Outline:**\n{outline}\n"
+#                 f"**Target Audience:** {audience}\n"
+#                 f"**Writing Tone:** {tone}\n\n"
+
+#                 "### YOUR ASSIGNED SECTION\n"
+#                 f"**Title:** {task.title}\n"
+#                 f"**Section Type:** {task.section_type}\n"
+#                 f"**Word Count Goal:** {task.target_words} words\n"
+#                 f"**Key Points to Cover:**\n{bullets_text}\n\n"
+
+#                 "### WRITING CONSTRAINTS\n"
+#                 "1. **No Repetition**: Do not re-introduce the entire topic. Start directly with the substance of your section.\n"
+#                 "2. **Seamless Flow**: Transition naturally. If you are not the 'Intro' section, assume the reader already knows the basics.\n"
+#                 "3. **Markdown Only**: Use H2 (##) for your title. Use bolding for emphasis, but do not use H1 (#).\n"
+#                 "4. **Factual Grounding & Citations**:\n"
+#                     "- Ground your writing ONLY in the provided research snippets.\n"
+#                     "- **Citation Format**: When you mention a fact from the evidence, you MUST link it using the 'title' from that specific evidence item as the link text.\n"
+#                     "- **Example**: If the evidence title is 'Microsoft HSA 2025', write it like: [Microsoft HSA 2025](URL).\n"
+#                     "- **NEVER** use generic text like '[Source Name]' or '[Link]'. Always use the actual descriptive title of the source provided."
+#                 "### OUTPUT RULES\n"
+#                 "- Output ONLY the Markdown content.\n"
+#                 "- No 'Here is your section' or other conversational filler."
+#             )
+#         ),
+#         HumanMessage(
+#             content=(
+#                 f"Topic: {blog_topic}\n\n"
+#                 f"Research Evidence to include:\n{evidence_text}"
+#             )
+#         ),
+#     ]
+
 def worker_prompt(
     task: TaskSchema,
     blog_topic: str,
@@ -106,57 +167,51 @@ def worker_prompt(
 ) -> list:
 
     bullets_text = "\n".join(f"- {b}" for b in task.bullets)
-    
-    # Create a simple outline so the worker knows the full story
-    outline = "\n".join([f"{t.id}. {t.title}, {t.goal}" for t in plan.tasks])
+    outline = "\n".join([f"{t.id}. {t.title} (Goal: {t.goal})" for t in plan.tasks])
 
-    # Improved evidence formatting: Include the content/snippet, not just the URL
-    # A worker can't cite what it can't read!
+    # Limit evidence to ONLY what is relevant to this task to reduce noise
     evidence_text = "\n".join(
-        f"SOURCE: {e.title}\nURL: {e.url}\nCONTENT: {e.content[:300]}..." #type: ignore
-        for e in evidence[:5]
+        f"SOURCE_ID: {i}\nTITLE: {e.title}\nURL: {e.url}\nCONTENT: {e.content}"
+        for i, e in enumerate(evidence)
+    )
+
+    system_content = (
+        "### ROLE\n"
+        "You are an Elite Technical Content Architect. You are writing one chapter of a high-authority technical report. "
+        "Your goal is to provide deep substance, not surface-level summaries.\n\n"
+
+        "### GLOBAL BLOG CONTEXT\n"
+        f"**Full Blog Outline:**\n{outline}\n"
+        f"**Target Audience:** {audience}\n"
+        f"**Writing Tone:** {tone}\n\n"
+
+        "### YOUR ASSIGNED SECTION\n"
+        f"**Chapter Title:** {task.title}\n"
+        f"**Focus:** {task.section_type}\n"
+        f"**Word Count:** Target ~{task.target_words} words\n"
+        f"**Requirements:**\n{bullets_text}\n\n"
+
+        "### STRICT WRITING CONSTRAINTS\n"
+        "1. **Zero-Repetition**: Do not 'set the stage' or re-introduce the blog. Start with the core technical value of this specific chapter.\n"
+        "2. **Evidence-Based Only**: If a claim is not supported by the 'Research Evidence' below, do not include it. No 'hallucinated' industry trends.\n"
+        "3. **Technical Depth**: Use precise terminology. Avoid fluff phrases like 'In the rapidly evolving world of...' or 'In conclusion...'.\n"
+        "4. **Citations**: Every claim must be linked. Format: [Source Title](URL). Do not use [1] or [Source].\n"
+        "5. **Formatting**: Use ## for the chapter title. Use bolding for key terms and bullet points for complex lists.\n\n"
+
+        "### OUTPUT RULES\n"
+        "- Output ONLY the Markdown content.\n"
+        "- No conversational filler."
+    )
+
+    human_content = (
+        f"Topic: {blog_topic}\n\n"
+        f"### RESEARCH DATA TO UTILIZE:\n{evidence_text}"
     )
 
     return [
-        SystemMessage(
-            content=(
-                "### ROLE\n"
-                "You are an Elite Technical Writer. Your task is to write ONE specific chapter of a comprehensive blog post. "
-                "You must maintain the flow of the overall narrative while strictly adhering to the assigned section's goals.\n\n"
-
-                "### GLOBAL BLOG CONTEXT\n"
-                f"**Full Blog Outline:**\n{outline}\n"
-                f"**Target Audience:** {audience}\n"
-                f"**Writing Tone:** {tone}\n\n"
-
-                "### YOUR ASSIGNED SECTION\n"
-                f"**Title:** {task.title}\n"
-                f"**Section Type:** {task.section_type}\n"
-                f"**Word Count Goal:** {task.target_words} words\n"
-                f"**Key Points to Cover:**\n{bullets_text}\n\n"
-
-                "### WRITING CONSTRAINTS\n"
-                "1. **No Repetition**: Do not re-introduce the entire topic. Start directly with the substance of your section.\n"
-                "2. **Seamless Flow**: Transition naturally. If you are not the 'Intro' section, assume the reader already knows the basics.\n"
-                "3. **Markdown Only**: Use H2 (##) for your title. Use bolding for emphasis, but do not use H1 (#).\n"
-                "4. **Factual Grounding & Citations**:\n"
-                    "- Ground your writing ONLY in the provided research snippets.\n"
-                    "- **Citation Format**: When you mention a fact from the evidence, you MUST link it using the 'title' from that specific evidence item as the link text.\n"
-                    "- **Example**: If the evidence title is 'Microsoft HSA 2025', write it like: [Microsoft HSA 2025](URL).\n"
-                    "- **NEVER** use generic text like '[Source Name]' or '[Link]'. Always use the actual descriptive title of the source provided."
-                "### OUTPUT RULES\n"
-                "- Output ONLY the Markdown content.\n"
-                "- No 'Here is your section' or other conversational filler."
-            )
-        ),
-        HumanMessage(
-            content=(
-                f"Topic: {blog_topic}\n\n"
-                f"Research Evidence to include:\n{evidence_text}"
-            )
-        ),
+        SystemMessage(content=system_content),
+        HumanMessage(content=human_content),
     ]
-
 
 def get_evidence_research_prompt(raw_result: List[dict]) -> list:
     return [

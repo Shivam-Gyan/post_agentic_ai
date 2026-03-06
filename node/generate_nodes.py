@@ -180,7 +180,7 @@ async def worker(payload: dict) -> dict:
             plan=plan,
             audience=audience,
             tone=tone,
-            evidence=evidence
+            evidence=evidence,
         )
 
         # ---- Model inference (GPU-bound) ----

@@ -112,7 +112,7 @@ class BlogState(BaseModel):
 
     # this two below and are used for user_query and determine the mdoe user want like geernate a blog, refine previous blog or just have conversation
     user_query: str = Field(description="A detailed description of the blog topic provided by user", default="")
-    mode: Literal["generate", "refine", "chat", "publish"] = "generate"
+    mode: Literal["generate", "refine", "chat", "publish","guard"] = "generate"
 
     # conversatio state to keep track of the conversation history and the structured summary memory
     messages: Annotated[List[BaseMessage], Field(description="A list of messages in the conversation history",default_factory=list),add_messages]
