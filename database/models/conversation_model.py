@@ -19,6 +19,7 @@ class Conversation(Document):
     user_id: str                 # links to User
     title: str = "New Chat"
     messages: list[Message] = []
+    user_prompts: list[str] = []
     created_at: datetime = datetime.utcnow()
     updated_at: datetime = datetime.utcnow()
     is_active: bool = True

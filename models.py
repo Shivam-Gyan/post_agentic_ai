@@ -41,20 +41,20 @@ structured_output_model_research = structure_model.with_structured_output(Eviden
 
 # generation_model = ChatOllama(model='deepseek-r1:1.5b',temperature=0.4)
 
-# generation_model = ChatGroq(
-#     #  model="llama-3.3-70b-versatile",
-#     #  model="openai/gpt-oss-120b",
-#     model="meta-llama/llama-4-scout-17b-16e-instruct",
-#     api_key=GROQ_API_KEY, #type: ignore
-#     temperature=0.4
-# )
-generation_model = ChatOllama(
+generation_model = ChatGroq(
     #  model="llama-3.3-70b-versatile",
     #  model="openai/gpt-oss-120b",
-    model="ministral-3:3b",
-    # api_key=GROQ_API_KEY, #type: ignore
+    model="meta-llama/llama-4-scout-17b-16e-instruct",
+    api_key=GROQ_API_KEY, #type: ignore
     temperature=0.4
 )
+# generation_model = ChatOllama(
+#     #  model="llama-3.3-70b-versatile",
+#     #  model="openai/gpt-oss-120b",
+#     model="ministral-3:3b",
+#     # api_key=GROQ_API_KEY, #type: ignore
+#     temperature=0.4
+# )
 
 def get_generation_model():
     return generation_model
