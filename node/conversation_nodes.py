@@ -12,7 +12,7 @@ async def chat_node_func(state: BlogState):
     try:
         #  fetch the conversation summary and history from state
         summary = state.summary
-        history = state.messages[-6:]
+        history = state.messages[-20:]
 
         # print(f"\n\nConversation History passed to chat node: \n {history}")
         # print(f"\n\nConversation Summary passed to chat node: \n {summary}")

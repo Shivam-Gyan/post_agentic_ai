@@ -11,7 +11,9 @@ from models import conversation_summary_structured_output_model
 async def intent_detection_node(state: BlogState):
 
     try:
-        mode, cleaned_query = parse_mode(state.user_query)
+        # mode, cleaned_query = parse_mode(state.user_query)
+        mode = state.mode.strip().lower()
+        cleaned_query = state.user_query.strip() if state.user_query else ""
 
         if not mode and not cleaned_query:
             raise ValueError("Intent detection failed to parse mode and query")
@@ -46,12 +48,12 @@ async def intent_detection_node(state: BlogState):
         messages_to_remove = None
 
 
-        keep_last = 3  # number of recent messages to keep after trimming
+        keep_last = 20  # number of recent messages to keep after trimming
 
         # checking the size of the conversation history messages to reduce and summarize
-        if len(state.messages) > 6:
+        if len(state.messages) > 30:
 
-            print(f"\n\nOriginal Messages before summary : \n{state.messages}")
+            # print(f"\n\nOriginal Messages before summary : \n{state.messages}")
             # summarize all messages EXCEPT the most recent ones
             messages_to_summarize = state.messages[:-keep_last]
 
@@ -62,8 +64,8 @@ async def intent_detection_node(state: BlogState):
 
             try:
                 updated_summary = await conversation_summary_structured_output_model.ainvoke(prompt)
-                print(f"\n\nMessages Summary generated after LLM call: \n {updated_summary}")
-                print("\n\n")
+                # print(f"\n\nMessages Summary generated after LLM call: \n {updated_summary}")
+                # print("\n\n")
             except Exception as summary_err:
                 print(f"Warning: summary model call failed ({summary_err}); keeping existing summary.")
                 updated_summary = None

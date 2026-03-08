@@ -1,17 +1,20 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI,Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from agent import blog_agentic_ai
 from typing import Optional
 from fastapi import HTTPException, status
 from pydantic import BaseModel, EmailStr
-from datetime import datetime
+# from datetime import datetime
 import json
-
+from controller.auth_controller import register_user, verify_user
 from database.mongodb import init_db
-from database.models.conversation_model import Conversation, Message, RoleEnum
-from database.models.user_model import User
+# from database.models.conversation_model import Conversation, Message, RoleEnum
+# from database.models.user_model import User
+from controller.user_controller import get_user_details
+from controller.conversation_controller import *
+from middleware.auth_middleware import AuthMiddleware
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -28,21 +31,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# authenticate the request and verify the jwt token
+app.add_middleware(AuthMiddleware)
 
 
 class GenerateRequest(BaseModel):
     user_query: Optional[str] = None
     mode: Optional[str] = "chat"
-    thread_id: Optional[str] = "blog_generation_thread"
-    user_id: str = "anonymous"
+    # thread_id: Optional[str] = "blog_generation_thread"
+    # user_id: str = "anonymous"
+
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
 
 
-@app.post("/generate")
-async def generate(req: GenerateRequest):
+# ──────────────────────────── Blog generation endpoint ────────────────────────────
+
+@app.post("/generate/{thread_id}")
+async def generate(request: Request):
     """Start a blog generation/refinement/chat turn and stream tokens back.
 
     Streams SSE (Server-Sent Events) with JSON payloads:
@@ -50,14 +58,30 @@ async def generate(req: GenerateRequest):
       - {"type": "result", ...} for the final state summary
       - {"type": "error", "detail": "..."} on failure
     """
-    if req.mode and req.user_query:
-        user_query = f"{req.mode}: {req.user_query}"
-    else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Provide `blog_description` or `user_query`")
+
+    body_json = await request.json()
+    thread_id = request.path_params.get("thread_id")
+    # user_id = request.state.user.get("sub")
+    user_id = "69ad014ef26c88290f793353"
+
+    try:
+        body = GenerateRequest(**(body_json or {}))
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request body")
+    allowed_modes = {"chat", "generate", "refine", "publish"}
+
+    body.mode = (body.mode or "").strip().lower()
+    body.user_query = (body.user_query or "").strip()
+
+    if body.mode not in allowed_modes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid mode. Allowed modes: {', '.join(allowed_modes)}")
+
+    if not body.mode and not body.user_query:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Provide `mode` or `user_query`")
 
     config = {
         "configurable": {
-            "thread_id": req.thread_id or "blog_generation_thread",
+            "thread_id": thread_id or "blog_generation_thread",
         }
     }
 
@@ -68,10 +92,9 @@ async def generate(req: GenerateRequest):
         try:
             final_state = None
             async for event in blog_agentic_ai.astream_events(
-                {"user_query": user_query}, config=config, version="v2"
+                {"user_query":body.user_query, "mode": body.mode}, config=config, version="v2" #type: ignore[call-arg]
             ):
                 kind = event["event"]
-
                 # Stream individual LLM tokens
                 if kind == "on_chat_model_stream":
                     chunk = event["data"].get("chunk")
@@ -97,19 +120,24 @@ async def generate(req: GenerateRequest):
             # Send the final result summary
             result = {
                 "type": "result",
-                "mode": final_state.get("mode") if final_state else None,
+                # "title": ,
                 "response": assistant_response,
                 "final_blog": final_state.get("final_blog") if final_state else None,
             }
             yield f"data: {json.dumps(result)}\n\n"
 
             # Save conversation to DB after streaming is done
-            await _save_conversation(
-                user_id=req.user_id,
-                thread_id=req.thread_id or "blog_generation_thread",
-                user_query=req.user_query,  # type: ignore[arg-type]
+            response = await save_conversation_func(
+                user_id=user_id,
+                thread_id=thread_id or "blog_generation_thread",
+                user_query=body.user_query,  # type: ignore[arg-type]
                 assistant_response=assistant_response,
             )
+
+            if not response.get("success"):
+                # If DB save failed, send an error event
+                yield f"data: {json.dumps({'type': 'error', 'detail': 'Failed to save conversation'})}\n\n"
+
 
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'detail': str(e)})}\n\n"
@@ -117,97 +145,86 @@ async def generate(req: GenerateRequest):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-async def _save_conversation(
-    user_id: str, thread_id: str, user_query: str, assistant_response: str | None
-):
-    """Persist the user prompt and assistant reply into the conversations collection."""
-    now = datetime.utcnow()
-
-    conversation = await Conversation.find_one(
-        Conversation.thread_id == thread_id,
-        Conversation.user_id == user_id,
-    )
-
-    user_msg = Message(role=RoleEnum.user, content=user_query, timestamp=now)
-    new_messages = [user_msg]
-
-    if assistant_response:
-        assistant_msg = Message(role=RoleEnum.assistant, content=assistant_response, timestamp=now)
-        new_messages.append(assistant_msg)
-
-    if conversation:
-        conversation.messages.extend(new_messages)
-        conversation.user_prompts.append(user_query)
-        conversation.updated_at = now
-        await conversation.save()
-    else:
-        conversation = Conversation(
-            thread_id=thread_id,
-            user_id=user_id,
-            title=user_query[:50] if user_query else "New Chat",
-            messages=new_messages,
-            user_prompts=[user_query],
-            created_at=now,
-            updated_at=now,
-        )
-        await conversation.insert()
-
-
-# ──────────────────────────── User endpoints ────────────────────────────
+# ──────────────────────────── Authentication endpoints ────────────────────────────
 
 class CreateUserRequest(BaseModel):
     name: str
     email: EmailStr
+    password: str
     profile_picture: Optional[str] = None
 
 
-@app.post("/users", status_code=status.HTTP_201_CREATED)
-async def create_user(req: CreateUserRequest):
-    existing = await User.find_one(User.email == req.email)
-    if existing:
-        raise HTTPException(status_code=400, detail="User with this email already exists")
+@app.post("/auth/register", status_code=status.HTTP_201_CREATED)
+async def register(req: CreateUserRequest):
+    """this route handle the user register/signup for new user"""
+    try:
+        response = await register_user(req)
+        return response
+    except Exception as e:
+        return {"message": str(e),"success": False}
 
-    user = User(name=req.name, email=req.email, profile_picture=req.profile_picture)
-    await user.insert()
-    return {"id": str(user.id), "name": user.name, "email": user.email}
+class VerifyUserRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+@app.post("/auth/verify",status_code=status.HTTP_200_OK)
+async def verify(req: VerifyUserRequest):
+    """this route handle the user verification"""
+    try:
+        response = await verify_user(req)
+        return response
+    except Exception as e:
+        return {"message": str(e),"success": False}
+
+# ──────────────────────── User endpoint ────────────────────────
+
+# get user details by user_id
+@app.get("/user/detail")
+async def user_details(req: Request):
+    """this route handle the user details fetching"""
+    try:
+        response = await get_user_details(req)
+        return response
+    except Exception as e:
+        return {"message": str(e),"success": False}
+
+
 
 
 # ──────────────────────── Conversation endpoints ────────────────────────
 
-@app.get("/users/{user_id}/conversations")
-async def get_user_conversations(user_id: str):
+# get all the conversation from the user_id (from Jwt)
+@app.get("/conversations")
+async def get_user_conversations(req:Request):
     """Return all conversations for a user (metadata only — no messages)."""
-    conversations = await Conversation.find(
-        Conversation.user_id == user_id
-    ).sort("-updated_at").to_list()
-
-    return [
-        {
-            "id": str(c.id),
-            "thread_id": c.thread_id,
-            "title": c.title,
-            "created_at": c.created_at.isoformat(),
-            "updated_at": c.updated_at.isoformat(),
-            "is_active": c.is_active,
-            "message_count": len(c.messages),
-        }
-        for c in conversations
-    ]
-
-
+    try:
+        response = await get_all_conversations_func(req)
+        return response
+    except Exception as e:
+        return {"message": str(e),"success": False}
+    
+    
+# get conversation by thread_id and user_id (from Jwt)
 @app.get("/conversations/{thread_id}")
-async def get_conversation(thread_id: str):
+async def get_conversation(req: Request):
     """Return a single conversation with full messages."""
-    conversation = await Conversation.find_one(Conversation.thread_id == thread_id)
-    if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    try:
+        response = await get_conversation_by_thread_id_func(req)
+        return response
+    except Exception as e:
+        return {"message": str(e),"success": False}
+    
+    
+# soft delete a conversation by setting is_active to False
+@app.post("/conversations/{thread_id}/delete")
+async def delete_conversation(req: Request):
+    """Soft delete a conversation by setting is_active to False."""
+    try:
+        response = await delete_conversation_func(req)
+        return response
+    
+    except Exception as e:
+        return {"message": str(e),"success": False}
 
-    return {
-        "id": str(conversation.id),
-        "thread_id": conversation.thread_id,
-        "user_id": conversation.user_id,
-        "title": conversation.title,
-        "messages": [m.model_dump() for m in conversation.messages],
-        "created_at": conversation.created_at.isoformat(),
-        "updated_at": conversation.updated_at.isoformat(),
-    }
+# create a new conversation 
+
