@@ -1,8 +1,7 @@
 import re
-from typing import List
-from langchain_tavily.tavily_search import TavilySearch
-from typing import List, Dict
 import asyncio
+from typing import List, Dict
+from langchain_tavily.tavily_search import TavilySearch
 import os
 from dotenv import load_dotenv
 load_dotenv()
@@ -27,13 +26,14 @@ def safe_filename(title: str) -> str:
     return f"{name}.md"
 
 #  perform tavily search for a given query and return the results
-async def perform_research(query: str):
-    # This is a placeholder implementation. You would replace this with actual calls to your search tool or API.
+async def perform_research(query: str, timeout: int = 15):
     search_tool = TavilySearch(api_key=TAVILY_API_KEY, max_results=2, search_depth="basic")  # type: ignore
-
-    response = await search_tool.ainvoke({"query": query})
-    
-    return response
+    try:
+        response = await asyncio.wait_for(search_tool.ainvoke({"query": query}), timeout=timeout)
+        return response
+    except asyncio.TimeoutError:
+        print(f"perform_research: Tavily timed out for query '{query}' after {timeout}s — returning empty results")
+        return {"results": []}
 
 # normalizing the research results into a consistent format for the reducer to consume
 def normalize_tavily_results(results: List[Dict]) -> List[Dict]:

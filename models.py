@@ -51,7 +51,7 @@ generation_model = ChatGroq(
 # generation_model = ChatOllama(
 #     #  model="llama-3.3-70b-versatile",
 #     #  model="openai/gpt-oss-120b",
-#     model="ministral-3:3b",
+#     model="qwen3:1.7b", #type: ignore
 #     # api_key=GROQ_API_KEY, #type: ignore
 #     temperature=0.4
 # )

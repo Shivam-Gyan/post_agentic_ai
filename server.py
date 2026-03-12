@@ -15,6 +15,8 @@ from database.mongodb import init_db
 from controller.user_controller import get_user_details
 from controller.conversation_controller import *
 from middleware.auth_middleware import AuthMiddleware
+from dotenv import load_dotenv
+load_dotenv()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -61,8 +63,8 @@ async def generate(request: Request):
 
     body_json = await request.json()
     thread_id = request.path_params.get("thread_id")
-    # user_id = request.state.user.get("sub")
-    user_id = "69ad014ef26c88290f793353"
+    user_id = request.state.user.get("sub")
+    # user_id = "69ad014ef26c88290f793353"
 
     try:
         body = GenerateRequest(**(body_json or {}))
@@ -159,7 +161,12 @@ async def register(req: CreateUserRequest):
     """this route handle the user register/signup for new user"""
     try:
         response = await register_user(req)
-        return response
+        return {
+            "user": response, 
+            "jwt_token":response["jwt_token"], 
+            "success": True, 
+            "message": "User registered successfully"
+        }
     except Exception as e:
         return {"message": str(e),"success": False}
 
@@ -172,7 +179,12 @@ async def verify(req: VerifyUserRequest):
     """this route handle the user verification"""
     try:
         response = await verify_user(req)
-        return response
+        return {
+            "user": response,
+            "jwt_token": response["jwt_token"], 
+            "success": True, 
+            "message": "User verified successfully"
+        }
     except Exception as e:
         return {"message": str(e),"success": False}
 
@@ -203,7 +215,6 @@ async def get_user_conversations(req:Request):
     except Exception as e:
         return {"message": str(e),"success": False}
     
-    
 # get conversation by thread_id and user_id (from Jwt)
 @app.get("/conversations/{thread_id}")
 async def get_conversation(req: Request):
@@ -213,8 +224,7 @@ async def get_conversation(req: Request):
         return response
     except Exception as e:
         return {"message": str(e),"success": False}
-    
-    
+     
 # soft delete a conversation by setting is_active to False
 @app.post("/conversations/{thread_id}/delete")
 async def delete_conversation(req: Request):
@@ -226,5 +236,25 @@ async def delete_conversation(req: Request):
     except Exception as e:
         return {"message": str(e),"success": False}
 
-# create a new conversation 
+#  set_is_active to False for soft delete, or remove from DB for hard delete
+@app.delete("/conversations/soft-delete/{thread_id}")
+async def soft_delete_conversation(req: Request):
+    """Soft delete a conversation by setting is_active to False."""
+    try:
+        response = await soft_delete_conversation_func(req)
+        return response
+    
+    except Exception as e:
+        return {"message": str(e),"success": False}
+    
+# delete conversation by thread_id and user_id (from Jwt)
+@app.delete("/conversations/hard-delete/{thread_id}")
+async def hard_delete_conversation(req: Request):
+    """Hard delete a conversation by removing it from DB."""
+    try:
+        response = await hard_delete_conversation_func(req)
+        return response
+    
+    except Exception as e:
+        return {"message": str(e),"success": False}
 

@@ -17,9 +17,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if path in public_routes:
             return await call_next(request)
         
-                # Allow streaming route with dynamic thread id
-        if path.startswith("/generate"):
-            return await call_next(request)
+        # NOTE: /generate is protected and requires JWT.
+        # if path.startswith("/conversations"):
+        #     return await call_next(request)
 
         auth_header = request.headers.get("Authorization")
 
@@ -34,7 +34,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 raise ValueError("Invalid auth scheme")
 
             payload = verify_token(token)
-
+            print("Authenticated user:", payload)
             request.state.user = payload
 
         except Exception:

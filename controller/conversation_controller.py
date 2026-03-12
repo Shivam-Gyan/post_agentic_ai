@@ -17,7 +17,8 @@ async def get_all_conversations_func(req:Request):
         user_id:str = req.state.user.get("sub")
 
         conversations = await Conversation.find(
-            Conversation.user_id == user_id
+            Conversation.user_id == user_id,
+            Conversation.is_active == True
         ).sort("-updated_at").to_list()
 
         return {
@@ -138,3 +139,45 @@ async def save_conversation_func(
         logger.exception("DB error during register")
         return {"success": False, "message": "Database error occurred while saving conversation"}
 
+# soft delete a conversation by setting is_active to False
+async def soft_delete_conversation_func(req:Request):
+    """Soft delete a conversation by setting is_active to False."""
+
+    try:
+        user_id:str = req.state.user.get("sub")
+        thread_id = req.path_params.get("thread_id")
+
+        conversation = await Conversation.find_one(Conversation.thread_id == thread_id, Conversation.user_id == user_id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        conversation.is_active = False
+        conversation.updated_at = datetime.utcnow()
+        await conversation.save()
+
+        return {"message": "Conversation soft deleted successfully", "success": True}
+    
+    except PyMongoError as e:
+        logger.exception("DB error during register")
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    
+# hard delete a conversation by removing it from DB
+async def hard_delete_conversation_func(req:Request):
+    """Hard delete a conversation by removing it from DB."""
+
+    try:
+        user_id:str = req.state.user.get("sub")
+        thread_id = req.path_params.get("thread_id")
+
+        conversation = await Conversation.find_one(Conversation.thread_id == thread_id, Conversation.user_id == user_id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        await conversation.delete()
+
+        return {"message": "Conversation hard deleted successfully", "success": True}
+
+    except PyMongoError as e:
+        logger.exception("DB error during register")
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    

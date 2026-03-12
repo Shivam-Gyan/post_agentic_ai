@@ -38,7 +38,7 @@ async def register_user(req: CreateUserRequest):
             "email": user.email
         })
 
-        return {"sub": str(user.id), "name": user.name, "email": user.email, "jwt_token": jwt_token}
+        return {"sub": str(user.id), "name": user.name, "email": user.email, "jwt_token": jwt_token, "profile_picture": user.profile_picture, "created_at": user.created_at,"is_active": user.is_active}
     
     except PyMongoError as e:
         logger.exception("DB error during register")
@@ -62,7 +62,7 @@ async def verify_user(req: VerifyUserRequest):
             "email": user.email
         })
 
-        return {"sub": str(user.id), "name": user.name, "email": user.email, "jwt_token": jwt_token}
+        return {"sub": str(user.id), "name": user.name, "email": user.email, "jwt_token": jwt_token,"profile_picture": user.profile_picture, "created_at": user.created_at,"is_active": user.is_active}
     except PyMongoError as e:
         logger.exception("DB error during verify")
         raise HTTPException(status_code=503, detail="Database unavailable")

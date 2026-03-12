@@ -26,7 +26,7 @@ async def router_node(state:BlogState) -> dict:
 
         return {
             'blog_topic': response.topic, #type: ignore
-            'blog_description': response.description, #type: ignore
+            # blog_description is not a BlogState field — removed to prevent silent state-validation failure
             'audience': response.audience,  #type: ignore
             'tone': response.tone,  #type: ignore
             'require_research': response.require_research,  #type: ignore
