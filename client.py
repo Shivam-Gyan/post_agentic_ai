@@ -226,7 +226,7 @@ if generate_btn:
         st.stop()
 
     async def run_pipeline():
-        initial_state = BlogState(blog_description=topic_input)
+        initial_state = BlogState(user_query=topic_input)
         config = {"configurable": {"thread_id": "blog_agentic_ai_1"}}
         
         status = st.status("Running Agent Pipeline...", expanded=True)

@@ -2,6 +2,7 @@ from langchain_ollama import ChatOllama
 from states import EvidencePackSchema, IntentModeStructuredOutputSchema, ResearchSchema, PlanSchema, FeedbackStructuredOutputSchema, SummaryStructuredOutputSchema
 import itertools
 from langchain_groq import ChatGroq
+from groq import Groq
 from dotenv import load_dotenv
 import os
 load_dotenv()
@@ -37,9 +38,6 @@ structured_output_model = structure_model.with_structured_output(PlanSchema, met
 # model to perform research based on the research queries provided by the orchestrator node
 structured_output_model_research = structure_model.with_structured_output(EvidencePackSchema, method="function_calling")
 
-# 2. model used to generate the blog sections and final blog post
-
-# generation_model = ChatOllama(model='deepseek-r1:1.5b',temperature=0.4)
 
 generation_model = ChatGroq(
     #  model="llama-3.3-70b-versatile",
@@ -51,10 +49,17 @@ generation_model = ChatGroq(
 # generation_model = ChatOllama(
 #     #  model="llama-3.3-70b-versatile",
 #     #  model="openai/gpt-oss-120b",
-#     model="qwen3:1.7b", #type: ignore
+#     model="deepseek-r1:1.5b", #type: ignore
 #     # api_key=GROQ_API_KEY, #type: ignore
 #     temperature=0.4
 # )
 
 def get_generation_model():
     return generation_model
+
+
+
+
+
+#  text to speech model using groq
+text_to_speech_model = Groq(api_key=GROQ_API_KEY)

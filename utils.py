@@ -49,11 +49,65 @@ def normalize_tavily_results(results: List[Dict]) -> List[Dict]:
 
     return normalized
 
+# utils/retry.py
 
-# if __name__ == "__main__":
-#     research_results = asyncio.run(perform_research("Oracle trending news"))
-#     print(research_results)
+import asyncio
+import logging
+from typing import TypeVar, Callable, Awaitable
 
+logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+async def with_retry(
+    fn: Callable[[], Awaitable[T]],
+    *,
+    max_retries: int = 3,
+    backoff: float = 1.5,
+    fallback: T,
+    label: str = "task",
+) -> T:
+    """
+    Retry an async callable up to max_retries times with linear back-off.
+    
+    - ValueError (validation errors) → fail immediately, return fallback
+    - Any other exception            → retry with back-off
+    - All retries exhausted          → return fallback
+    
+    Args:
+        fn:          Zero-argument async callable to retry  →  lambda: model.ainvoke(prompt)
+        max_retries: Max number of attempts (default 3)
+        backoff:     Seconds multiplier per attempt (1.5 → 1.5s, 3s, 4.5s)
+        fallback:    Value to return when all retries fail
+        label:       Human-readable name shown in logs
+    """
+    last_error: Exception | None = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            result = await fn()
+            if attempt > 1:
+                logger.info("with_retry: '%s' succeeded on attempt %d", label, attempt)
+            return result
+
+        except ValueError as ve:
+            logger.error("with_retry: '%s' validation error (not retrying). error=%s", label, ve)
+            return fallback
+
+        except Exception as e:
+            last_error = e
+            logger.warning(
+                "with_retry: '%s' failed (attempt %d/%d). error=%s",
+                label, attempt, max_retries, e,
+            )
+            if attempt < max_retries:
+                await asyncio.sleep(backoff * attempt)
+
+    logger.error(
+        "with_retry: '%s' all %d attempts exhausted. last_error=%s",
+        label, max_retries, last_error,
+    )
+    return fallback
 
 # parser mode 
 
@@ -72,6 +126,61 @@ def parse_mode(user_input: str):
 
     return None, user_input
 
+
+import re
+from markdown import markdown
+from bs4 import BeautifulSoup
+
+
+
+
+def strip_markdown(md_text: str) -> str:
+    """Convert markdown to plain readable text for TTS."""
+
+    # 1. Convert markdown → HTML
+    html = markdown(md_text)
+
+    # 2. Parse HTML → plain text
+    soup = BeautifulSoup(html, "html.parser")
+    plain = soup.get_text(separator=" ")
+
+    # 3. Clean up leftover symbols and whitespace
+    plain = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', plain)  # links → just label
+    plain = re.sub(r'`+', '', plain)                          # backticks
+    plain = re.sub(r'#+\s*', '', plain)                       # headings hashes
+    plain = re.sub(r'\*+', '', plain)                         # bold/italic stars
+    plain = re.sub(r'_{1,2}', '', plain)                      # underscores
+    plain = re.sub(r'~{1,2}', '', plain)                      # strikethrough
+    plain = re.sub(r'>\s*', '', plain)                        # blockquotes
+    plain = re.sub(r'-{3,}|={3,}', '', plain)                 # horizontal rules
+    plain = re.sub(r'\n{3,}', '\n\n', plain)                  # excess newlines
+    plain = re.sub(r' {2,}', ' ', plain)                      # excess spaces
+
+    return plain.strip()
+
+MAX_TTS_CHARS = 1000  # stay safely under Groq's 4000 limit
+
+def truncate_to_limit(text: str, limit: int = MAX_TTS_CHARS) -> str:
+    """Truncate at sentence boundary to stay under TTS char limit."""
+    if len(text) <= limit:
+        return text
+    
+    truncated = text[:limit]
+    # try to end at a sentence boundary
+    last_period = max(
+        truncated.rfind("."),
+        truncated.rfind("!"),
+        truncated.rfind("?"),
+    )
+    if last_period > limit // 2:  # only use boundary if it's not too early
+        return truncated[:last_period + 1]
+    
+    return truncated.strip()
+
+
+# if __name__ == "__main__":
+#     research_results = asyncio.run(perform_research("Oracle trending news"))
+#     print(research_results)
 
 
 

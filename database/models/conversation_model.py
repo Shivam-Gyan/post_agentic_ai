@@ -10,9 +10,11 @@ class RoleEnum(str, Enum):
     system = "system"
 
 class Message(BaseModel):
+    checkpoint_id: Optional[str] = None  # To link messages to specific checkpoints in LangGraph
     role: RoleEnum
     content: str
     timestamp: datetime = datetime.utcnow()
+    final_blog: Optional[str] = None  # New field to store the final blog content if this message contains it
 
 class Conversation(Document):
     thread_id: str               # links to LangGraph checkpoint

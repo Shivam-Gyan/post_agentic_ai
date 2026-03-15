@@ -8,6 +8,9 @@ from node.conversation_nodes import chat_node_func
 from node.generate_nodes import router_node,research_node, router_condition_func, fanout, orchestrator, reducer, worker, publish_node
 from node.refinement_nodes import refine_node_func, refine_structured_output_model
 from node.intent_detection_nodes import intent_detection_node, intent_router_func
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langgraph.prebuilt import tools_condition, ToolNode
+from config_mcp_server import SERVERS
 from states import BlogState
 from dotenv import load_dotenv
 load_dotenv()
@@ -15,7 +18,7 @@ load_dotenv()
 os.environ["LANGSMITH_PROJECT"] = os.getenv("LANGSMITH_PROJECT", "blog_agentic_ai")
 
 # refinement subgraph to handle the refinement 
-def build_refine_subgraph():
+async def build_refine_subgraph():
     g = StateGraph(BlogState)
 
     # define the nodes for refinement subgraph
@@ -25,7 +28,7 @@ def build_refine_subgraph():
     # define the edges for refinement subgraph
     g.add_edge(START,'refine_structured_output_node')
     g.add_edge('refine_structured_output_node','refine_node')
-    g.set_entry_point('refine_structured_output_node')
+    # g.set_entry_point('refine_structured_output_node')
     g.add_edge('refine_node',END)
 
     # No separate checkpointer — the parent graph's MemorySaver handles
@@ -34,15 +37,36 @@ def build_refine_subgraph():
 
 
 
-def build_conversation_subgraph():
+async def build_conversation_subgraph():
+
+    mcp_client  = MultiServerMCPClient(SERVERS) #type: ignore
+
+    global tools
+    try:
+        tools = await mcp_client.get_tools()
+    except Exception as e:
+        # If MCP servers can't be contacted at startup (common in dev),
+        # fall back to an empty tools mapping and continue — the graph
+        # can still run in closed-book/chat modes.
+        print(f"Warning: failed to load MCP tools: {e}")
+        tools = {}
+
+    # `tools` shape may not exactly match the static type expected by ToolNode;
+    # silence precise arg-type checking here since runtime value is correct.
+    tools_node = ToolNode(tools = tools)  # type: ignore[arg-type]
+
+
     g = StateGraph(BlogState)
 
     # define the nodes for conversation subgraph
     g.add_node('chat_node', chat_node_func)
+    g.add_node('tools',tools_node) # neccessary to name as it 'tools'
 
     # define the edges for conversation subgraph
     g.add_edge(START,'chat_node')
-    g.add_edge('chat_node',END)
+    g.add_conditional_edges('chat_node', tools_condition)
+    g.add_edge('tools','chat_node')
+    # g.add_edge('chat_node',END)
     
     # No separate checkpointer — the parent graph's MemorySaver handles
     # state persistence so AIMessages carry over between turns.
@@ -50,13 +74,13 @@ def build_conversation_subgraph():
 
 
 # main graph of Agentic AI Blog Generator
-def build_blog_graph():
+async def build_blog_graph():
     """Build and compile the blog generation graph.
     Extracted into a function so Streamlit can cache it with @st.cache_resource
     and keep the MemorySaver alive across reruns / file-watcher reloads."""
 
-    refine_subgraph = build_refine_subgraph()
-    conversation_subgraph = build_conversation_subgraph()
+    refine_subgraph = await build_refine_subgraph()
+    conversation_subgraph = await build_conversation_subgraph()
     # 1. initialize the state graph
     g = StateGraph(BlogState)
 
@@ -89,84 +113,12 @@ def build_blog_graph():
     return g.compile(checkpointer=checkpointer)
 
 
-# Default module-level instance (used when running without Streamlit)
-blog_agentic_ai = build_blog_graph()
+_init_lock = asyncio.Lock()
+blog_agentic_ai = None
 
-# async def main():
-#     print("\n----------- Agentic AI Blog Generator ----------\n")
-#     print("Type 'exit' or 'quit' to stop.\n")
-
-#     config = {
-#         "configurable": {
-#             "thread_id": "blog_generation_thread",
-#         }
-#     }
-
-#     while True:
-#         try:
-#             user_input = input("You: ").strip()
-
-#             if not user_input:
-#                 continue
-
-#             if user_input.lower() in ("exit", "quit"):
-#                 print("\n👋 Goodbye!\n")
-#                 break
-
-#             print()
-
-#             # Pass ONLY the fields that change per turn.
-#             # Passing the full initial_state would overwrite plain (non-reducer)
-#             # fields like `summary` with their blank defaults on every turn,
-#             # wiping the checkpointed summary. Reducer fields like `messages`
-#             # (add_messages) are safe either way, but plain fields are not.
-#             final_state = await blog_agentic_ai.ainvoke(
-#                 {"user_query": user_input}, # type: ignore
-#                 config=config  # type: ignore
-#             )
-
-#             # print(blog_agentic_ai.get_state(config=config).values['messages']) #type: ignore
-
-#             mode = final_state["mode"]
-#             print(f"[Mode: {mode}]\n")
-
-#             if mode == "guard":
-#                 messages = final_state["messages"]
-#                 if messages:
-#                     print(f"Assistant: {messages[-1].content}\n")
-
-#             if mode == "chat":
-#                 messages = final_state["messages"]
-#                 # print(f"\nConversation AI : ({messages[-1].content}):")
-#                 if messages:
-#                     print(f"Assistant: {messages[-1].content}\n")
-
-#             elif mode in ("generate", "refine"):
-#                 blog = final_state.get("final_blog", "")
-#                 if blog:
-#                     print(f"📝 Blog:\n\n{blog}\n")
-#                 else:
-#                     print("⚠️  No blog generated yet.\n")
-
-#             elif mode == "publish":
-#                 result = final_state.get("publish_result", "")
-#                 print(f"🚀 Publish result: {result}\n")
-
-#         except KeyboardInterrupt:
-#             print("\n\n⚠️ Interrupted.")
-#             break
-
-#         except Exception as e:
-#             print(f"\n❌ An error occurred: {e}\n")
-
-
-
-
-
-# if __name__ == "__main__":
-#     try:
-#         asyncio.run(main())
-#     except KeyboardInterrupt:
-#         print("\n\n⚠️ Process interrupted by user.")
-#     except Exception as e:
-#         print(f"\n\n❌ Unexpected error: {e}")
+async def init_blog_graph():
+    global blog_agentic_ai
+    async with _init_lock:              # only one coroutine enters at a time
+        if blog_agentic_ai is None:     # re-check inside the lock
+            blog_agentic_ai = await build_blog_graph()
+    return blog_agentic_ai

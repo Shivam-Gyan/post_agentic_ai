@@ -108,6 +108,23 @@ class RefinementState(BaseModel):
 class IntentModeStructuredOutputSchema(BaseModel):
     mode: Literal["generate", "refine", "chat", "publish"] = Field(description="The mode of operation based on the user query, which can be 'generate' for generating a new blog, 'refine' for refining an existing blog, 'chat' for having a conversation with the user, or 'publish' for publishing the blog to an external platform.")
 
+from typing import Annotated, List
+import operator
+
+def replace_or_extend(old: List[str], new: List[str]) -> List[str]:
+    """
+    If new list is empty → it's a reset signal → return []
+    If new list has items → it's a worker appending → extend old list
+    This lets orchestrator reset with [] and workers accumulate with [section]
+    """
+    if not new:
+        return []           # reset signal from orchestrator
+    return old + new        # accumulate signal from workers
+
+# In BlogState:
+
+
+
 class BlogState(BaseModel):
 
     # this two below and are used for user_query and determine the mdoe user want like geernate a blog, refine previous blog or just have conversation
@@ -136,7 +153,7 @@ class BlogState(BaseModel):
 
     plan : PlanSchema = Field(description="The plan for the blog including tasks", default_factory=lambda: PlanSchema(blog_title="", tasks=[]))  
     evidence: List[EvidenceSchema] = Field(description="The evidence retrieved from research to fill in the gaps in blog description", default_factory=list)  
-    sections: Annotated[List[str], Field(description="A list of sections for the blog"), operator.add] = []
+    sections: Annotated[List[str], Field(description="A list of sections for the blog"), replace_or_extend] = []
 
     final_blog : str = Field(description="The completed blog post", default="")
     publish_result: str = Field(description="Result of publishing the blog to external platform", default="")

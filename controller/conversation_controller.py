@@ -1,7 +1,7 @@
 
 
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import HTTPException,Request
 from database.models.conversation_model import Conversation, Message, RoleEnum, RoleEnum
@@ -98,27 +98,46 @@ async def delete_conversation_func(req:Request):
 # create a new conversation (while generation of response by AI stream)
 
 async def save_conversation_func(
-    user_id: str, thread_id: str, user_query: str, assistant_response: str | None
+    user_id: str,
+    thread_id: str,
+    user_query: str,
+    assistant_response: str | None,
+    assistant_response_blog: str | None = None,
 ):
     """Persist the user prompt and assistant reply into the conversations collection."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     try:
+        new_messages = []
+
+        if user_query:
+            new_messages.append(Message(
+                role=RoleEnum.user,
+                content=user_query,
+                timestamp=now,
+            ))
+
+        if assistant_response:
+            new_messages.append(Message(
+                role=RoleEnum.assistant,
+                content=assistant_response,
+                final_blog=assistant_response_blog,
+                timestamp=now,
+            ))
+
+        if not new_messages:
+            logger.warning("save_conversation_func: nothing to save for thread=%s", thread_id)
+            return {"success": True}
+
         conversation = await Conversation.find_one(
             Conversation.thread_id == thread_id,
             Conversation.user_id == user_id,
         )
 
-        user_msg = Message(role=RoleEnum.user, content=user_query, timestamp=now)
-        new_messages = [user_msg]
-
-        if assistant_response:
-            assistant_msg = Message(role=RoleEnum.assistant, content=assistant_response, timestamp=now)
-            new_messages.append(assistant_msg)
-
         if conversation:
             conversation.messages.extend(new_messages)
-            conversation.user_prompts.append(user_query)
+            if user_query:
+                conversation.user_prompts.append(user_query)
             conversation.updated_at = now
             await conversation.save()
         else:
@@ -127,18 +146,17 @@ async def save_conversation_func(
                 user_id=user_id,
                 title=user_query[:50] if user_query else "New Chat",
                 messages=new_messages,
-                user_prompts=[user_query],
+                user_prompts=[user_query] if user_query else [],
                 created_at=now,
                 updated_at=now,
             )
             await conversation.insert()
 
         return {"success": True}
-    
-    except PyMongoError as e:
-        logger.exception("DB error during register")
-        return {"success": False, "message": "Database error occurred while saving conversation"}
 
+    except Exception as e:
+        logger.exception("save_conversation_func failed for thread=%s", thread_id)
+        return {"success": False, "message": str(e)}
 # soft delete a conversation by setting is_active to False
 async def soft_delete_conversation_func(req:Request):
     """Soft delete a conversation by setting is_active to False."""

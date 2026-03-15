@@ -2,8 +2,8 @@
 from typing import cast
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph.message import RemoveMessage
-from models import get_generation_model, conversation_summary_structured_output_model
-from prompts.conversation_prompt import get_conversation_summary_prompt,get_conversation_prompt
+from models import get_generation_model
+from prompts.conversation_prompt import get_conversation_prompt
 from states import BlogState, SummaryStructuredOutputSchema
 
 
@@ -31,10 +31,18 @@ async def chat_node_func(state: BlogState):
 
 
 
-        response = await get_generation_model().ainvoke([HumanMessage(content=conversation_prompt)])
+        # Import `agent` here to avoid circular imports at module import time.
+        import agent
+
+        gen = get_generation_model()
+        agent_tools = getattr(agent, "tools", None)
+        if agent_tools:
+            gen = gen.bind_tools(agent_tools)
+
+        response = await gen.ainvoke([HumanMessage(content=conversation_prompt)])
 
         return {
-            "messages": [AIMessage(content=response.content)]
+            "messages": [response]
         }
 
     except Exception as e:

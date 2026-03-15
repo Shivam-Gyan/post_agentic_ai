@@ -1,45 +1,47 @@
+from langchain.messages import AIMessage, HumanMessage
+
 from models import structured_output_model, get_generation_model,research_structured_output_model, structured_output_model_research
 from states import BlogState, EvidencePackSchema, PlanSchema, ResearchSchema
 from prompts.generation_prompts import get_blog_planning_prompt, worker_prompt,get_router_prompt, get_evidence_research_prompt
 from typing import Dict, List, cast
 from langgraph.types import Send, interrupt
 from langgraph.errors import GraphInterrupt
-from langgraph.graph import END
 import httpx
+import logging
 
-from utils import normalize_tavily_results, perform_research, safe_filename
+logger = logging.getLogger(__name__)
+
+from utils import normalize_tavily_results, perform_research, safe_filename, with_retry
 
 
 
 #  1. get the blog_topic and other details from initial state
 
-async def router_node(state:BlogState) -> dict:
-    try:
-        print("Router_node : Extracting details from blog description...\n")
-        # 1. Get the prompt for detail extraction
-        prompt = get_router_prompt(state.user_query)
-        # 2. call the structured output model to extract details from blog description
-        response = cast(ResearchSchema, await research_structured_output_model.ainvoke(prompt))
+async def router_node(state: BlogState) -> dict:
+    prompt = get_router_prompt(state.user_query)
 
-        #  return the extracted details to update the state
-        print("Router_node : Detail extraction complete.\n")
+    response = await with_retry(
+        fn=lambda: research_structured_output_model.ainvoke(prompt),
+        fallback=None,
+        label="router_node/detail_extraction",
+    )
 
-        return {
-            'blog_topic': response.topic, #type: ignore
-            # blog_description is not a BlogState field — removed to prevent silent state-validation failure
-            'audience': response.audience,  #type: ignore
-            'tone': response.tone,  #type: ignore
-            'require_research': response.require_research,  #type: ignore
-            'research_mode': response.research_mode,  #type: ignore
-            'research_queries': response.research_queries, #type: ignore
-            'blog_kind': response.blog_kind #type: ignore
-            }
-    
-    except Exception as e:
+    if response is None:
+        logger.error("router_node: detail extraction failed after all retries")
+        raise RuntimeError("Failed to extract blog details after all retries.")
 
-        print(f"Router_node : Error in router_node: {e}")
-        raise e 
+    response = cast(ResearchSchema, response)
+    logger.info("router_node: detail extraction complete. topic=%s", response.topic)
 
+    return {
+        "blog_topic":        response.topic,          # type: ignore
+        "audience":          response.audience,        # type: ignore
+        "tone":              response.tone,            # type: ignore
+        "require_research":  response.require_research,# type: ignore
+        "research_mode":     response.research_mode,  # type: ignore
+        "research_queries":  response.research_queries,# type: ignore
+        "blog_kind":         response.blog_kind,       # type: ignore
+    }
 
 # Routing Conditon
 def router_condition_func(state: BlogState) -> str:
@@ -51,70 +53,77 @@ def router_condition_func(state: BlogState) -> str:
 
 
 # 2. Research_node
-async def research_node(state:BlogState) -> dict:
-
-    # get queries from state
+async def research_node(state: BlogState) -> dict:
     queries = state.research_queries or []
-
     raw_result: List[Dict] = []
 
     for query in queries:
-        result = await perform_research(query)
-        # result_list_dict.append(result) #type: ignore
-        raw_result.extend(result.get("results", []))
+        try:
+            result = await perform_research(query)
+            raw_result.extend(result.get("results", []))
+        except Exception as e:
+            logger.warning("research_node: query failed, skipping. query=%s error=%s", query, e)
+            continue
 
     if not raw_result:
+        logger.warning("research_node: no results collected, proceeding without evidence")
         return {'evidence': []}
-    
-    # 2. Deduplicate by URL (Critical for Production)
+
+    # Deduplicate by URL
     unique_results = {}
     for r in raw_result:
         url = r.get("url")
         if url not in unique_results:
             unique_results[url] = r
-    
 
     deduplicated_list = list(unique_results.values())
-    
 
-    # normalize the results into a consistent format for the reducer to consume
+    # Normalize the results into a consistent format
     normalized_results = normalize_tavily_results(deduplicated_list)
 
-    # get the prompt for evidence extraction from normalized research results
-    evidence_research_prompt = get_evidence_research_prompt(normalized_results) 
+    # Get the prompt for evidence extraction
+    evidence_research_prompt = get_evidence_research_prompt(normalized_results)
 
-    # call the structured output model to extract evidence from research results
-    response = cast(EvidencePackSchema, await structured_output_model_research.ainvoke(evidence_research_prompt))
+    response = await with_retry(
+        fn=lambda: structured_output_model_research.ainvoke(evidence_research_prompt),
+        fallback=None,
+        label="research_node/structured_output",
+    )
 
-    print("Research_node : Research complete. Evidence collected:\n")
+    if response is None:
+        logger.error("research_node: structured output failed, proceeding without evidence")
+        return {"evidence": []}
 
-    return {'evidence': response.evidence} #type: ignore
+    return {"evidence": cast(EvidencePackSchema, response).evidence}  # type: ignore
+
 
 
 
 #  3. Orchestration logic for the blog planning process
-async def orchestrator(state:BlogState) -> Dict:
-    try:
-        print("Orchestrator : Generating blog plan...\n")
-        # 1. Get the prompt for blog planning
-        blog_description = state.user_query
-        blog_topic = state.blog_topic
-        blog_audience = state.audience
-        blog_tone = state.tone
-        blog_evidence = state.evidence
+async def orchestrator(state: BlogState):
+    blog_topic       = state.blog_topic
+    blog_description = state.user_query
+    blog_audience    = state.audience
+    blog_tone        = state.tone
+    blog_evidence    = state.evidence
 
-        prompt = get_blog_planning_prompt(blog_topic, blog_description, blog_audience, blog_tone, blog_evidence)
+    prompt = get_blog_planning_prompt(
+        blog_topic, blog_description, blog_audience, blog_tone, blog_evidence
+    )
 
-        # 2. call the structured output model to generate the plan
-        response = cast(PlanSchema, await structured_output_model.ainvoke(prompt))
+    response = await with_retry(
+        fn=lambda: structured_output_model.ainvoke(prompt),
+        fallback=None,
+        label="orchestrator/blog_plan",
+    )
 
-        # print("Raw response from model:\n\n", response)
-        print("Orchestrator : Blog plan generation complete.\n")
+    if response is None:
+        logger.error("orchestrator: blog plan generation failed after all retries")
+        raise RuntimeError("Failed to generate blog plan after all retries.")
 
-        return {'plan': response ,"blog_title": response.blog_title} #type: ignore
-    except Exception as e:
-        print(f"Orchestrator : Error in generate_blog_plan: {e}")
-        raise e
+    response = cast(PlanSchema, response)
+    logger.info("orchestrator: blog plan generation complete. title=%s", response.blog_title)
+    return {"plan": response, "blog_title": response.blog_title}  # type: ignore
 
 # create worker to parallely execute the tasks in the plan generated by orchestrator
 def fanout(state: BlogState) -> List[Send]:
@@ -150,92 +159,105 @@ def fanout(state: BlogState) -> List[Send]:
 
 #  5. actual generation of each task seggregated by worker will executed by worker node
 async def worker(payload: dict) -> dict:
-    try:
-        # ---- Validate payload ----
-        task = payload["task"]
-        if not task:
-            raise ValueError("Worker received empty task batch")
+    # ---- Validate payload (not retryable) ----
+    task = payload.get("task")
+    if not task:
+        logger.error("worker: empty task received")
+        return {"sections": []}
 
-        print(f"Worker : Generating sections for task: {getattr(task, 'title', 'unknown')}...\n")
+    blog_topic = payload.get("blog_topic")
+    plan       = payload.get("plan")
+    audience   = payload.get("audience")
+    tone       = payload.get("tone")
+    evidence   = payload.get("evidence", [])
 
-        blog_topic = payload["blog_topic"]
-        plan = payload["plan"]
-        audience = payload["audience"]
-        tone = payload["tone"]
-        evidence = payload.get("evidence", [])
+    if not blog_topic or not plan:
+        logger.error("worker: missing blog_topic or plan for task=%s", getattr(task, "title", "unknown"))
+        return {"sections": []}
 
-        if not blog_topic or not plan:
-            raise ValueError("Missing blog topic or plan in worker payload")
-        
-        if not audience or not tone:
-            raise ValueError("Missing audience or tone in worker payload")
+    if not audience or not tone:
+        logger.error("worker: missing audience or tone for task=%s", getattr(task, "title", "unknown"))
+        return {"sections": []}
 
-        # if not evidence:
-        #     raise ValueError("Missing evidence in worker payload")
+    # ---- Build prompt ----
+    prompt = worker_prompt(
+        task=task,
+        blog_topic=blog_topic,
+        plan=plan,
+        audience=audience,
+        tone=tone,
+        evidence=evidence,
+    )
 
-        # ---- Build prompt for grouped tasks ----
-        prompt = worker_prompt(
-            task=task,
-            blog_topic=blog_topic,
-            plan=plan,
-            audience=audience,
-            tone=tone,
-            evidence=evidence,
-        )
-
-        # ---- Model inference (GPU-bound) ----
+    # ---- Model inference with retry ----
+    async def generate() -> str:
         model = get_generation_model()
         response_msg = await model.ainvoke(prompt)
-
-        content = response_msg.content.strip() #type: ignore
+        content = response_msg.content.strip()  # type: ignore
         if not content:
             raise ValueError("Empty response from model")
-        
-        print(f"Worker : Section generation complete for task: {getattr(task, 'title', 'unknown')}.\n")
+        return content
 
-        return {"sections": [content]}
+    content = await with_retry(
+        fn=generate,
+        fallback="",
+        label=f"worker/{getattr(task, 'title', 'unknown')}",
+    )
 
-    except Exception as e:
-        # ---- Graceful fallback ----
-        
-        task = payload["task"]
+    if not content:
+        logger.error("worker: generation failed for task=%s", getattr(task, "title", "unknown"))
+        return {"sections": []}
 
-        print(f"Worker : Error generating sections for task: {getattr(task, 'title', 'unknown')}. Error: {e}\n")
-
-        error_section = (
-            f"## ⚠️ Section generation failed\n\n"
-            f"**Affected sections:** {getattr(task, 'title', 'unknown')}\n\n"
-            f"**Error:** {str(e)}\n\n"
-            f"**Trace (truncated):**\n"
-        )
-
-        # IMPORTANT:
-        # We return a section instead of raising
-        # so the reducer and graph can continue
-        return {"sections": [error_section]}
+    return {"sections": [content]}
 
 #  6. reducer to aggregate all sections from workers into final blog
-async def reducer(state:BlogState):
-    try:   
+async def reducer(state: BlogState):
+    title      = state.blog_title or "Untitled Blog"
+    blog       = "\n\n".join(state.sections)
+    final_blog = f"# {title}\n\n{blog}"
 
-        print("Reducer : Aggregating sections from workers...\n")
-        title = state.blog_title or "Untitled Blog"
-        blog = "\n\n".join(state.sections)
+    file_name = safe_filename(title)
+    with open(file_name, "w", encoding="utf-8") as f:
+        f.write(final_blog)
 
-        final_blog = f"# {title}\n\n{blog}"
+    # ── Build a cheap structural summary instead of full blog ──
+    section_titles = [
+        getattr(task, "title", f"Section {i+1}")
+        for i, task in enumerate(state.plan.tasks or [])
+    ] if state.plan else []
 
-        file_name = safe_filename(title)
-        print(f"Saving final blog to {file_name}...\n")
+    section_list = "\n".join(f"  - {t}" for t in section_titles)
 
-        with open(file_name, "w", encoding="utf-8") as f:
-            f.write(final_blog)
+    # blog_context_message = HumanMessage(
+    #     content=(
+    #         f"[SYSTEM CONTEXT]\n"
+    #         f"A blog has been generated with the following structure:\n"
+    #         f"Title: {title}\n"
+    #         f"Topic: {state.blog_topic}\n"
+    #         f"Audience: {state.audience}\n"
+    #         f"Tone: {state.tone}\n"
+    #         f"Sections:\n{section_list}\n\n"
+    #         f"The full blog is stored separately. "
+    #         f"If the user asks to refine a specific section, "
+    #         f"that section's content will be provided to you."
+    #     )
+    # )
 
-        print(f"Reducer : Final blog aggregation complete and saved to {file_name}.\n")
-        return {'final_blog': final_blog}
-    except Exception as e:
-        print(f"Error in reducer: {e}")
-        raise e
+    assistant_message = AIMessage(
+        content=(
+            f"Your blog **{title}** has been generated successfully! "
+            f"You can read it in the panel below. "
+            f"Feel free to ask me to refine any section or make changes."
+        )
+    )
 
+    logger.info("reducer: final blog assembled. title=%s", title)
+
+    return {
+        "final_blog": final_blog,
+        "sections":   [],
+        "messages":   [assistant_message],
+    }
 #  7. HITL publish node – asks user whether to post blog to Feather Feable
 async def publish_node(state: BlogState) -> dict:
     """Human-in-the-loop node: interrupt the graph and wait for the user
