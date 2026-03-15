@@ -1,10 +1,15 @@
+from typing import List, Dict, TypeVar, Callable, Awaitable
+from langchain_tavily.tavily_search import TavilySearch
+from markdown import markdown
+from bs4 import BeautifulSoup
+import os
 import re
 import asyncio
-from typing import List, Dict
-from langchain_tavily.tavily_search import TavilySearch
-import os
 from dotenv import load_dotenv
+import logging
+
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
@@ -51,11 +56,7 @@ def normalize_tavily_results(results: List[Dict]) -> List[Dict]:
 
 # utils/retry.py
 
-import asyncio
-import logging
-from typing import TypeVar, Callable, Awaitable
 
-logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -126,10 +127,6 @@ def parse_mode(user_input: str):
 
     return None, user_input
 
-
-import re
-from markdown import markdown
-from bs4 import BeautifulSoup
 
 
 
