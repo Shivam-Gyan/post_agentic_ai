@@ -103,6 +103,7 @@ async def save_conversation_func(
     user_query: str,
     assistant_response: str | None,
     assistant_response_blog: str | None = None,
+    checkpoint_id: str | None = None
 ):
     """Persist the user prompt and assistant reply into the conversations collection."""
     now = datetime.now(timezone.utc)
@@ -122,6 +123,7 @@ async def save_conversation_func(
                 role=RoleEnum.assistant,
                 content=assistant_response,
                 final_blog=assistant_response_blog,
+                checkpoint_id=checkpoint_id,
                 timestamp=now,
             ))
 
@@ -148,7 +150,7 @@ async def save_conversation_func(
                 messages=new_messages,
                 user_prompts=[user_query] if user_query else [],
                 created_at=now,
-                updated_at=now,
+                updated_at=now
             )
             await conversation.insert()
 

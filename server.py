@@ -92,6 +92,7 @@ VERBOSE_NODE_LABELS: dict[str, str] = {
     "router_node":                   "Deciding generation strategy...",
     "research_node":                 "Researching topic...",
     "orchestrator":                  "Planning blog sections...",
+    "reducer":                       "Combining section drafts...",
     "refine_structured_output_node": "Parsing refinement instructions...",
     "refine_node":                   "Refining blog...",
     # chat_node intentionally omitted — on_chat_model_start sends "Thinking..." instead
@@ -198,36 +199,29 @@ async def generate(request: Request):
                 kind: str = event["event"]
                 metadata: dict = event.get("metadata", {})
                 node_name: str = metadata.get("langgraph_node", "")
+                checkpoint_id: Optional[str] = metadata.get("checkpoint_id")
 
-                logger.debug("Event: %s | Node: %s | Metadata: %s", kind, node_name, metadata)
+                logger.debug("Event: %s | Node: %s | Metadata: %s | Checkpoint ID: %s", kind, node_name, metadata, checkpoint_id)
 
                 # ── on_chain_start — verbose thinking steps ───────────────────
-                if kind == "on_chain_start":
-                    logger.info(
-                        "chain_start | node=%s | has_checkpoint_ns=%s | checkpoint_ns=%s",
-                        node_name,
-                        "checkpoint_ns" in event.get("metadata", {}),
-                        event.get("metadata", {}).get("checkpoint_ns", "MISSING"),
-                    )
-                    # Guard 1: skip the pregel outer duplicate (no checkpoint_ns)
-                    if node_name != "worker" and not is_inner_node_event(event): # type: ignore
-                        continue
 
-                    # Guard 2: worker fires N times (parallel fanout) — counter
+                if kind == "on_chain_start":
+
+                    # Worker: fanout fires it without checkpoint_ns — counter it regardless
                     if node_name == "worker":
-                        
                         worker_count += 1
-                        # print({"type": "verbose", "content": f"Writing section {worker_count}..."})
                         yield sse({"type": "verbose", "content": f"Writing section {worker_count}..."})
                         continue
 
-                    # Guard 3: skip subgraph wrappers, output-parser sub-chains,
-                    #          and any node not in the label map
+                    # Skip the pregel outer duplicate for all other nodes
+                    if not is_inner_node_event(event): #type: ignore
+                        continue
+
+                    # Skip nodes we have no label for (subgraph wrappers, output parsers, etc.)
                     if node_name in seen_verbose or node_name not in VERBOSE_NODE_LABELS:
                         continue
 
                     seen_verbose.add(node_name)
-                    # print({"type": "verbose", "content": VERBOSE_NODE_LABELS[node_name]})
                     yield sse({"type": "verbose", "content": VERBOSE_NODE_LABELS[node_name]})
 
                 # ── on_chat_model_start — "Thinking..." only for answer nodes ──
@@ -236,7 +230,7 @@ async def generate(request: Request):
                     # also fire this event — only surface it for user-facing nodes.
                     if node_name in ANSWER_NODES:
                         # print({"type": "verbose", "content": "Thinking..."})
-                        yield sse({"type": "verbose", "content": "Synthesizing request..."})
+                        yield sse({"type": "verbose", "content": "Understanding request..."})
 
                 # ── on_tool_start — tool call initiated ───────────────────────
                 elif kind == "on_tool_start":
@@ -285,12 +279,18 @@ async def generate(request: Request):
                 else None
             )
 
-            # print({"type": "result", "response": assistant_response, "final_blog": final_state.get("final_blog") if final_state else None})
+            latest_state = await agent.blog_agentic_ai.aget_state(config) #type: ignore[call-arg]
+            captured_checkpoint_id: Optional[str] = (
+                latest_state.config.get("configurable", {}).get("checkpoint_id")
+                if latest_state else None
+            )
+            logger.info("checkpoint_id from aget_state: %s", captured_checkpoint_id)
 
             yield sse({
                 "type":       "result",
                 "response":   assistant_response,
                 "final_blog": assistant_response_blog,
+                "checkpoint_id": captured_checkpoint_id,
             })
 
             # ── Persist conversation to DB ─────────────────────────────────────
@@ -300,7 +300,8 @@ async def generate(request: Request):
                     thread_id=thread_id,
                     user_query=body.user_query,  # type: ignore[arg-type]
                     assistant_response=assistant_response,
-                    assistant_response_blog=assistant_response_blog
+                    assistant_response_blog=assistant_response_blog,
+                    checkpoint_id=captured_checkpoint_id
                 )
                 if not db_response.get("success"):
                     logger.error("DB save failed for thread %s: %s", thread_id, db_response)
@@ -316,10 +317,50 @@ async def generate(request: Request):
             return
 
         except Exception as exc:
-            logger.exception("event_stream error for thread %s", thread_id)
-            yield sse({"type": "error", "detail": str(exc)})
+            logger.exception("Stream crashed!")
+            
+            # Even though it crashed, let's try to grab the last state 
+            # and save it so the user doesn't lose everything.
+            error_state = await agent.blog_agentic_ai.aget_state(config) #type: ignore[call-arg]
+
+            error_captured_checkpoint_id: Optional[str] = (
+                error_state.config.get("configurable", {}).get("checkpoint_id")
+                if error_state else None
+            )
+            
+            await save_conversation_func(
+                user_id=user_id,
+                thread_id=thread_id,
+                user_query=body.user_query, # type: ignore[arg-type]
+                assistant_response="[System Error: Interrupted]", 
+                assistant_response_blog=None,
+                checkpoint_id=error_captured_checkpoint_id
+            )
+            
+            # CORRECT — frontend gets the checkpoint to retry from
+            yield sse({
+                "type":        "error",
+                "detail":      "I ran into a problem, but I've saved our progress.",
+                "retry_checkpoint_id": error_captured_checkpoint_id,  # ← add this
+                "thread_id":   thread_id,
+            })
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.post("/retry/{thread_id}/{checkpoint_id}")
+async def retry_from_checkpoint(request: Request):
+
+    checkpoint_id: str = "1f1213ce-913c-6086-802e-39747f82708d"
+    # checkpoint_id: str = request.path_params.get("checkpoint_id") # type: ignore[call-arg]
+    thread_id: str = request.path_params.get("thread_id") # type: ignore[call-arg]
+    user_id: str = request.state.user.get("sub")
+
+    return StreamingResponse(agent.blog_agentic_ai.astream_events(
+        {"mode": "chat"},
+        config={"configurable": {"thread_id": thread_id, "checkpoint_id": checkpoint_id}}, # type: ignore[call-arg]
+        version="v2",
+    ), media_type="text/event-stream")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
