@@ -9,7 +9,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         # Skip auth for public routes
-        public_routes = ["/health", "/auth/register", "/auth/verify"]
+        public_routes = ["/health", "/auth/register", "/auth/verify"]  # Add more public routes as needed
         # Allow preflight CORS requests through without auth
         if request.method == "OPTIONS":
             return await call_next(request)
@@ -18,8 +18,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         
         # NOTE: /generate is protected and requires JWT.
-        # if path.startswith("/conversations"):
+        # if path.startswith("/retry"):
         #     return await call_next(request)
+        if path.startswith("/history"):
+            return await call_next(request)
 
         auth_header = request.headers.get("Authorization")
 

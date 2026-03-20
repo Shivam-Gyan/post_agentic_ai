@@ -44,7 +44,10 @@ generation_model = ChatGroq(
     #  model="openai/gpt-oss-120b",
     model="meta-llama/llama-4-scout-17b-16e-instruct",
     api_key=GROQ_API_KEY, #type: ignore
-    temperature=0.4
+    temperature=0.9,   # ← higher = more varied retries
+    model_kwargs={
+        "top_p": 0.95,  # ← also helps with diversity
+    }
 )
 # generation_model = ChatOllama(
 #     #  model="llama-3.3-70b-versatile",

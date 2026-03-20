@@ -39,7 +39,7 @@ async def chat_node_func(state: BlogState):
         if agent_tools:
             gen = gen.bind_tools(agent_tools)
 
-        response = await gen.ainvoke([HumanMessage(content=conversation_prompt)])
+        response = await gen.ainvoke(conversation_prompt)
 
         return {
             "messages": [response]

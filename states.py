@@ -126,7 +126,7 @@ def replace_or_extend(old: List[str], new: List[str]) -> List[str]:
 
 
 class BlogState(BaseModel):
-
+    retry_seed: Optional[str] = Field(description="A seed value to ensure deterministic retries", default=None)
     # this two below and are used for user_query and determine the mdoe user want like geernate a blog, refine previous blog or just have conversation
     user_query: str = Field(description="A detailed description of the blog topic provided by user", default="")
     mode: Literal["generate", "refine", "chat", "publish","guard"] = "generate"

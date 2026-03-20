@@ -44,6 +44,7 @@ async def build_conversation_subgraph():
     global tools
     try:
         tools = await mcp_client.get_tools()
+        # print(f"Loaded tools from MCP servers: {tools}")
     except Exception as e:
         # If MCP servers can't be contacted at startup (common in dev),
         # fall back to an empty tools mapping and continue — the graph

@@ -1,6 +1,6 @@
 from beanie import Document
-from pydantic import BaseModel
-from datetime import datetime
+from pydantic import BaseModel, Field
+from datetime import datetime, timezone
 from typing import Optional
 from enum import Enum
 
@@ -9,21 +9,35 @@ class RoleEnum(str, Enum):
     assistant = "assistant"
     system = "system"
 
-class Message(BaseModel):
-    checkpoint_id: Optional[str] = None  # To link messages to specific checkpoints in LangGraph
-    role: RoleEnum
+class ResponseVersion(BaseModel):
     content: str
-    timestamp: datetime = datetime.utcnow()
-    final_blog: Optional[str] = None  # New field to store the final blog content if this message contains it
+    final_blog: Optional[str] = None
+    final_checkpoint_id: Optional[str] = None
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class Message(BaseModel):
+    role: RoleEnum
+    content: str          # For assistant: always latest version. For user: the query.
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    # --- USER only ---
+    edit_id: Optional[str] = None
+
+    # --- ASSISTANT only ---
+    retry_id: Optional[str] = None # same for each turn of conversation (turn is a request <-> response cycle between user and agent)
+    final_checkpoint_id: Optional[str] = None  # Latest version's checkpoint — for next turn's parent_checkpoint_id
+    final_blog: Optional[str] = None           # Latest version's blog
+    versions: list[ResponseVersion] = Field(default_factory=list)  # ← fix
+
 
 class Conversation(Document):
     thread_id: str               # links to LangGraph checkpoint
     user_id: str                 # links to User
     title: str = "New Chat"
-    messages: list[Message] = []
-    user_prompts: list[str] = []
-    created_at: datetime = datetime.utcnow()
-    updated_at: datetime = datetime.utcnow()
+    messages: list[Message] = Field(default_factory=list)
+    user_prompts: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     is_active: bool = True
 
     class Settings:

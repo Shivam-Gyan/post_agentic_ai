@@ -4,7 +4,7 @@
 from datetime import datetime, timezone
 
 from fastapi import HTTPException,Request
-from database.models.conversation_model import Conversation, Message, RoleEnum, RoleEnum
+from database.models.conversation_model import Conversation, Message, ResponseVersion, RoleEnum
 from pymongo.errors import PyMongoError
 import logging
 logger = logging.getLogger(__name__)
@@ -97,68 +97,74 @@ async def delete_conversation_func(req:Request):
 
 # create a new conversation (while generation of response by AI stream)
 
-async def save_conversation_func(
-    user_id: str,
-    thread_id: str,
-    user_query: str,
-    assistant_response: str | None,
-    assistant_response_blog: str | None = None,
-    checkpoint_id: str | None = None
-):
-    """Persist the user prompt and assistant reply into the conversations collection."""
-    now = datetime.now(timezone.utc)
+# async def save_conversation_func(
+#     user_id: str,
+#     thread_id: str,
+#     user_query: str,
+#     assistant_response: str | None,
+#     assistant_response_blog: str | None,
+#     edit_checkpoint_id: str | None,
+#     retry_checkpoint_id: str | None,
+#     final_checkpoint_id: str | None,
+#     is_retry: bool = False,
+#     **kwargs
+# ):
+#     """Persist the user prompt and assistant reply into the conversations collection."""
+#     now = datetime.now(timezone.utc)
 
-    try:
-        new_messages = []
+#     try:
+#         new_messages = []
 
-        if user_query:
-            new_messages.append(Message(
-                role=RoleEnum.user,
-                content=user_query,
-                timestamp=now,
-            ))
+#         if user_query:
+#             new_messages.append(Message(
+#                 role=RoleEnum.user,
+#                 content=user_query,
+#                 timestamp=now,
+#                 checkpoint_id=edit_checkpoint_id,
+#             ))
 
-        if assistant_response:
-            new_messages.append(Message(
-                role=RoleEnum.assistant,
-                content=assistant_response,
-                final_blog=assistant_response_blog,
-                checkpoint_id=checkpoint_id,
-                timestamp=now,
-            ))
+#         if assistant_response:
+#             new_messages.append(Message(
+#                 role=RoleEnum.assistant,
+#                 content=assistant_response,
+#                 final_blog=assistant_response_blog,
+#                 checkpoint_id=retry_checkpoint_id,
+#                 final_checkpoint_id=final_checkpoint_id,
+#                 timestamp=now,
+#             ))
 
-        if not new_messages:
-            logger.warning("save_conversation_func: nothing to save for thread=%s", thread_id)
-            return {"success": True}
+#         if not new_messages:
+#             logger.warning("save_conversation_func: nothing to save for thread=%s", thread_id)
+#             return {"success": True}
 
-        conversation = await Conversation.find_one(
-            Conversation.thread_id == thread_id,
-            Conversation.user_id == user_id,
-        )
+#         conversation = await Conversation.find_one(
+#             Conversation.thread_id == thread_id,
+#             Conversation.user_id == user_id,
+#         )
 
-        if conversation:
-            conversation.messages.extend(new_messages)
-            if user_query:
-                conversation.user_prompts.append(user_query)
-            conversation.updated_at = now
-            await conversation.save()
-        else:
-            conversation = Conversation(
-                thread_id=thread_id,
-                user_id=user_id,
-                title=user_query[:50] if user_query else "New Chat",
-                messages=new_messages,
-                user_prompts=[user_query] if user_query else [],
-                created_at=now,
-                updated_at=now
-            )
-            await conversation.insert()
+#         if conversation:
+#             conversation.messages.extend(new_messages)
+#             if user_query:
+#                 conversation.user_prompts.append(user_query)
+#             conversation.updated_at = now
+#             await conversation.save()
+#         else:
+#             conversation = Conversation(
+#                 thread_id=thread_id,
+#                 user_id=user_id,
+#                 title=user_query[:50] if user_query else "New Chat",
+#                 messages=new_messages,
+#                 user_prompts=[user_query] if user_query else [],
+#                 created_at=now,
+#                 updated_at=now
+#             )
+#             await conversation.insert()
 
-        return {"success": True}
+#         return {"success": True}
 
-    except Exception as e:
-        logger.exception("save_conversation_func failed for thread=%s", thread_id)
-        return {"success": False, "message": str(e)}
+#     except Exception as e:
+#         logger.exception("save_conversation_func failed for thread=%s", thread_id)
+#         return {"success": False, "message": str(e)}
 # soft delete a conversation by setting is_active to False
 async def soft_delete_conversation_func(req:Request):
     """Soft delete a conversation by setting is_active to False."""
@@ -201,3 +207,252 @@ async def hard_delete_conversation_func(req:Request):
         logger.exception("DB error during register")
         raise HTTPException(status_code=503, detail="Database unavailable")
     
+
+
+# save conversation to db 
+async def save_conversation_func(
+    user_id: str,
+    thread_id: str,
+    user_query: str,
+    assistant_response: str | None,
+    assistant_response_blog: str | None,
+    edit_checkpoint_id: str | None,
+    retry_checkpoint_id: str | None,
+    final_checkpoint_id: str | None,
+):
+    now = datetime.now(timezone.utc)
+
+    try:
+        new_messages = []
+
+        if user_query:
+            new_messages.append(Message(
+                role=RoleEnum.user,
+                content=user_query,
+                timestamp=now,
+                edit_id=edit_checkpoint_id,      # ← explicit field
+            ))
+
+        if assistant_response:
+            v0 = ResponseVersion(
+                content=assistant_response,
+                final_blog=assistant_response_blog,
+                final_checkpoint_id=final_checkpoint_id,
+                timestamp=now,
+            )
+            new_messages.append(Message(
+                role=RoleEnum.assistant,
+                content=assistant_response,
+                final_blog=assistant_response_blog,
+                retry_id=retry_checkpoint_id,
+                final_checkpoint_id=final_checkpoint_id,
+                versions=[v0],                  # ← wrap in list
+                timestamp=now,
+            ))
+
+        if not new_messages:
+            logger.warning("save_conversation_func: nothing to save for thread=%s", thread_id)
+            return {"success": True}
+
+        conversation = await Conversation.find_one(
+            Conversation.thread_id == thread_id,
+            Conversation.user_id == user_id,
+        )
+
+        if conversation:
+            conversation.messages.extend(new_messages)
+            if user_query:
+                conversation.user_prompts.append(user_query)
+            conversation.updated_at = now
+            await conversation.save()
+        else:
+            conversation = Conversation(
+                thread_id=thread_id,
+                user_id=user_id,
+                title=user_query[:50] if user_query else "New Chat",
+                messages=new_messages,
+                user_prompts=[user_query] if user_query else [],
+                created_at=now,
+                updated_at=now,
+            )
+            await conversation.insert()
+
+        return {"success": True}
+
+    except Exception as e:
+        logger.exception("save_conversation_func failed for thread=%s", thread_id)
+        return {"success": False, "message": str(e)}
+    
+
+
+
+#  save retry version od assistant response to db
+async def save_retry_version(
+    user_id: str,
+    thread_id: str,
+    assistant_response: str | None,
+    assistant_response_blog: str | None,
+    final_checkpoint_id: str | None,
+    retry_checkpoint_id: str | None,  # used for safety check only
+):
+    now = datetime.now(timezone.utc)
+
+    try:
+        conversation = await Conversation.find_one(
+            Conversation.thread_id == thread_id,
+            Conversation.user_id == user_id,
+        )
+
+        if not conversation:
+            logger.error("save_retry_version: conversation not found for thread=%s", thread_id)
+            return {"success": False, "message": "Conversation not found"}
+
+        # Find the last assistant message — that's always the one being retried
+        last_assistant_idx: int | None = None
+        for i in range(len(conversation.messages) - 1, -1, -1):
+            if conversation.messages[i].role == RoleEnum.assistant:
+                last_assistant_idx = i
+                break
+
+        if last_assistant_idx is None:
+            logger.error("save_retry_version: no assistant message found for thread=%s", thread_id)
+            return {"success": False, "message": "No assistant message to retry"}
+
+        msg = conversation.messages[last_assistant_idx]
+
+        # Safety check — make sure retry_id matches
+        if retry_checkpoint_id and msg.retry_id != retry_checkpoint_id:
+            logger.warning(
+                "save_retry_version: retry_id mismatch for thread=%s expected=%s got=%s",
+                thread_id, msg.retry_id, retry_checkpoint_id
+            )
+            # Don't hard fail — mismatch is a warning, not a blocker
+
+        # Build new version
+        new_version = ResponseVersion(
+            content=assistant_response or "",
+            final_blog=assistant_response_blog,
+            final_checkpoint_id=final_checkpoint_id,
+            timestamp=now,
+        )
+
+        # Append version
+        msg.versions.append(new_version)
+
+        # Update top-level mirrors to reflect latest version
+        msg.content = assistant_response or ""
+        msg.final_blog = assistant_response_blog
+        msg.final_checkpoint_id = final_checkpoint_id  # points to newest version
+
+        conversation.messages[last_assistant_idx] = msg
+        conversation.updated_at = now
+        await conversation.save()
+
+        return {"success": True, "version_index": len(msg.versions) - 1}
+
+    except Exception as e:
+        logger.exception("save_retry_version failed for thread=%s", thread_id)
+        return {"success": False, "message": str(e)}
+    
+
+
+async def save_edit_turn(
+    user_id: str,
+    thread_id: str,
+    new_user_query: str,
+    assistant_response: str | None,
+    assistant_response_blog: str | None,
+    edit_checkpoint_id: str | None,
+    retry_checkpoint_id: str | None,
+    final_checkpoint_id: str | None,
+):
+    now = datetime.now(timezone.utc)
+
+    try:
+        conversation = await Conversation.find_one(
+            Conversation.thread_id == thread_id,
+            Conversation.user_id == user_id,
+        )
+
+        if not conversation:
+            # Fresh conversation — treat like a normal new turn
+            logger.warning("save_edit_turn: no conversation found, creating new for thread=%s", thread_id)
+            return await save_conversation_func(
+                user_id=user_id,
+                thread_id=thread_id,
+                user_query=new_user_query,
+                assistant_response=assistant_response,
+                assistant_response_blog=assistant_response_blog,
+                edit_checkpoint_id=edit_checkpoint_id,
+                retry_checkpoint_id=retry_checkpoint_id,
+                final_checkpoint_id=final_checkpoint_id,
+            )
+
+        # ✅ Find the last user message index — we replace from there
+        last_user_idx: int | None = None
+        for i in range(len(conversation.messages) - 1, -1, -1):
+            if conversation.messages[i].role == RoleEnum.user:
+                last_user_idx = i
+                break
+
+        if last_user_idx is None:
+            # No user message found — just append normally
+            logger.warning("save_edit_turn: no user message found for thread=%s", thread_id)
+            return await save_conversation_func(
+                user_id=user_id,
+                thread_id=thread_id,
+                user_query=new_user_query,
+                assistant_response=assistant_response,
+                assistant_response_blog=assistant_response_blog,
+                edit_checkpoint_id=edit_checkpoint_id,
+                retry_checkpoint_id=retry_checkpoint_id,
+                final_checkpoint_id=final_checkpoint_id,
+            )
+
+        # ✅ Truncate everything from last user message onwards
+        # This removes the old user message AND the old assistant message
+        conversation.messages = conversation.messages[:last_user_idx]
+
+        # ✅ Build fresh user + assistant messages (same as save_conversation_func)
+        new_messages = []
+
+        new_messages.append(Message(
+            role=RoleEnum.user,
+            content=new_user_query,
+            timestamp=now,
+            edit_id=edit_checkpoint_id,
+        ))
+
+        if assistant_response:
+            v0 = ResponseVersion(
+                content=assistant_response,
+                final_blog=assistant_response_blog,
+                final_checkpoint_id=final_checkpoint_id,
+                timestamp=now,
+            )
+            new_messages.append(Message(
+                role=RoleEnum.assistant,
+                content=assistant_response,
+                final_blog=assistant_response_blog,
+                retry_id=retry_checkpoint_id,
+                final_checkpoint_id=final_checkpoint_id,
+                versions=[v0],
+                timestamp=now,
+            ))
+
+        conversation.messages.extend(new_messages)
+
+        # ✅ Also update user_prompts — replace last prompt with new one
+        if conversation.user_prompts:
+            conversation.user_prompts[-1] = new_user_query
+        else:
+            conversation.user_prompts.append(new_user_query)
+
+        conversation.updated_at = now
+        await conversation.save()
+
+        return {"success": True}
+
+    except Exception as e:
+        logger.exception("save_edit_turn failed for thread=%s", thread_id)
+        return {"success": False, "message": str(e)}
