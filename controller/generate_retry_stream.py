@@ -143,6 +143,8 @@ async def _run_agent_stream(
             metadata = event.get("metadata", {})
             node_name = metadata.get("langgraph_node", "")
 
+            logger.info("Event kind=%s || node=%s", kind, node_name)
+
             if kind == "on_chain_start":
                 if node_name == "worker":
                     worker_count += 1
@@ -569,7 +571,8 @@ async def _run_agent_stream_edit(
                 new_user_query=new_user_query,
                 assistant_response=assistant_response,
                 assistant_response_blog=assistant_response_blog,
-                edit_checkpoint_id=edit_checkpoint_id_new,
+                edit_checkpoint_id_new=edit_checkpoint_id_new,
+                edit_checkpoint_id=edit_checkpoint_id,
                 retry_checkpoint_id=retry_checkpoint_id_new,
                 final_checkpoint_id=final_checkpoint_id_new,
             )
@@ -608,7 +611,8 @@ async def _run_agent_stream_edit(
                 new_user_query=new_user_query,
                 assistant_response="[Stopped by user]",
                 assistant_response_blog=None,
-                edit_checkpoint_id=edit_checkpoint_id_new,
+                edit_checkpoint_id_new=edit_checkpoint_id_new,
+                edit_checkpoint_id=edit_checkpoint_id,
                 retry_checkpoint_id=retry_checkpoint_id_new,
                 final_checkpoint_id=final_checkpoint_id_new,
             )
@@ -626,7 +630,8 @@ async def _run_agent_stream_edit(
                 new_user_query=new_user_query,
                 assistant_response="[Error: Something went wrong]",
                 assistant_response_blog=None,
-                edit_checkpoint_id=edit_checkpoint_id_new,
+                edit_checkpoint_id_new=edit_checkpoint_id_new,
+                edit_checkpoint_id=edit_checkpoint_id,
                 retry_checkpoint_id=None,
                 final_checkpoint_id=None,
             )

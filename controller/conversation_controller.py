@@ -356,12 +356,116 @@ async def save_retry_version(
     
 
 
+# async def save_edit_turn(
+#     user_id: str,
+#     thread_id: str,
+#     new_user_query: str,
+#     assistant_response: str | None,
+#     assistant_response_blog: str | None,
+#     edit_checkpoint_id: str | None,
+#     retry_checkpoint_id: str | None,
+#     final_checkpoint_id: str | None,
+# ):
+#     now = datetime.now(timezone.utc)
+
+#     try:
+#         conversation = await Conversation.find_one(
+#             Conversation.thread_id == thread_id,
+#             Conversation.user_id == user_id,
+#         )
+
+#         if not conversation:
+#             # Fresh conversation — treat like a normal new turn
+#             logger.warning("save_edit_turn: no conversation found, creating new for thread=%s", thread_id)
+#             return await save_conversation_func(
+#                 user_id=user_id,
+#                 thread_id=thread_id,
+#                 user_query=new_user_query,
+#                 assistant_response=assistant_response,
+#                 assistant_response_blog=assistant_response_blog,
+#                 edit_checkpoint_id=edit_checkpoint_id,
+#                 retry_checkpoint_id=retry_checkpoint_id,
+#                 final_checkpoint_id=final_checkpoint_id,
+#             )
+
+#         # ✅ Find the last user message index — we replace from there
+#         last_user_idx: int | None = None
+#         for i in range(len(conversation.messages) - 1, -1, -1):
+#             if conversation.messages[i].role == RoleEnum.user:
+#                 last_user_idx = i
+#                 break
+
+#         if last_user_idx is None:
+#             # No user message found — just append normally
+#             logger.warning("save_edit_turn: no user message found for thread=%s", thread_id)
+#             return await save_conversation_func(
+#                 user_id=user_id,
+#                 thread_id=thread_id,
+#                 user_query=new_user_query,
+#                 assistant_response=assistant_response,
+#                 assistant_response_blog=assistant_response_blog,
+#                 edit_checkpoint_id=edit_checkpoint_id,
+#                 retry_checkpoint_id=retry_checkpoint_id,
+#                 final_checkpoint_id=final_checkpoint_id,
+#             )
+
+#         # ✅ Truncate everything from last user message onwards
+#         # This removes the old user message AND the old assistant message
+#         conversation.messages = conversation.messages[:last_user_idx]
+
+#         # ✅ Build fresh user + assistant messages (same as save_conversation_func)
+#         new_messages = []
+
+#         new_messages.append(Message(
+#             role=RoleEnum.user,
+#             content=new_user_query,
+#             timestamp=now,
+#             edit_id=edit_checkpoint_id,
+#         ))
+
+#         if assistant_response:
+#             v0 = ResponseVersion(
+#                 content=assistant_response,
+#                 final_blog=assistant_response_blog,
+#                 final_checkpoint_id=final_checkpoint_id,
+#                 timestamp=now,
+#             )
+#             new_messages.append(Message(
+#                 role=RoleEnum.assistant,
+#                 content=assistant_response,
+#                 final_blog=assistant_response_blog,
+#                 retry_id=retry_checkpoint_id,
+#                 final_checkpoint_id=final_checkpoint_id,
+#                 versions=[v0],
+#                 timestamp=now,
+#             ))
+
+#         conversation.messages.extend(new_messages)
+
+#         # ✅ Also update user_prompts — replace last prompt with new one
+#         if conversation.user_prompts:
+#             conversation.user_prompts[-1] = new_user_query
+#         else:
+#             conversation.user_prompts.append(new_user_query)
+
+#         conversation.updated_at = now
+#         await conversation.save()
+
+#         return {"success": True}
+
+#     except Exception as e:
+#         logger.exception("save_edit_turn failed for thread=%s", thread_id)
+#         return {"success": False, "message": str(e)}
+
+
+
 async def save_edit_turn(
     user_id: str,
     thread_id: str,
     new_user_query: str,
     assistant_response: str | None,
     assistant_response_blog: str | None,
+    edit_checkpoint_id_new: str | None,  # new edit_id for the new user message
     edit_checkpoint_id: str | None,
     retry_checkpoint_id: str | None,
     final_checkpoint_id: str | None,
@@ -374,53 +478,65 @@ async def save_edit_turn(
             Conversation.user_id == user_id,
         )
 
+        # ─────────────────────────────────────────────
+        # CASE 1: No conversation → fallback
+        # ─────────────────────────────────────────────
         if not conversation:
-            # Fresh conversation — treat like a normal new turn
-            logger.warning("save_edit_turn: no conversation found, creating new for thread=%s", thread_id)
+            logger.warning("No conversation found, creating new.")
             return await save_conversation_func(
                 user_id=user_id,
                 thread_id=thread_id,
                 user_query=new_user_query,
                 assistant_response=assistant_response,
                 assistant_response_blog=assistant_response_blog,
-                edit_checkpoint_id=edit_checkpoint_id,
+                edit_checkpoint_id=edit_checkpoint_id_new,
                 retry_checkpoint_id=retry_checkpoint_id,
                 final_checkpoint_id=final_checkpoint_id,
             )
 
-        # ✅ Find the last user message index — we replace from there
-        last_user_idx: int | None = None
-        for i in range(len(conversation.messages) - 1, -1, -1):
-            if conversation.messages[i].role == RoleEnum.user:
-                last_user_idx = i
+        # ─────────────────────────────────────────────
+        # STEP 1: Find EXACT user message using edit_id
+        # ─────────────────────────────────────────────
+        target_user_idx = None
+
+        for i, msg in enumerate(conversation.messages):
+            if (
+                msg.role == RoleEnum.user
+                and msg.edit_id == edit_checkpoint_id
+            ):
+                target_user_idx = i
                 break
 
-        if last_user_idx is None:
-            # No user message found — just append normally
-            logger.warning("save_edit_turn: no user message found for thread=%s", thread_id)
-            return await save_conversation_func(
-                user_id=user_id,
-                thread_id=thread_id,
-                user_query=new_user_query,
-                assistant_response=assistant_response,
-                assistant_response_blog=assistant_response_blog,
-                edit_checkpoint_id=edit_checkpoint_id,
-                retry_checkpoint_id=retry_checkpoint_id,
-                final_checkpoint_id=final_checkpoint_id,
-            )
+        # ─────────────────────────────────────────────
+        # STEP 2: Fallback if not found
+        # ─────────────────────────────────────────────
+        if target_user_idx is None:
+            logger.warning("Edit target not found → fallback to last user message")
 
-        # ✅ Truncate everything from last user message onwards
-        # This removes the old user message AND the old assistant message
-        conversation.messages = conversation.messages[:last_user_idx]
+            for i in range(len(conversation.messages) - 1, -1, -1):
+                if conversation.messages[i].role == RoleEnum.user:
+                    target_user_idx = i
+                    break
 
-        # ✅ Build fresh user + assistant messages (same as save_conversation_func)
+        if target_user_idx is None:
+            logger.error("No user message found at all")
+            return {"success": False, "message": "No user message found"}
+
+        # ─────────────────────────────────────────────
+        # STEP 3: TRUNCATE conversation properly
+        # ─────────────────────────────────────────────
+        conversation.messages = conversation.messages[:target_user_idx]
+
+        # ─────────────────────────────────────────────
+        # STEP 4: Build new messages
+        # ─────────────────────────────────────────────
         new_messages = []
 
         new_messages.append(Message(
             role=RoleEnum.user,
             content=new_user_query,
             timestamp=now,
-            edit_id=edit_checkpoint_id,
+            edit_id=edit_checkpoint_id_new,
         ))
 
         if assistant_response:
@@ -430,6 +546,7 @@ async def save_edit_turn(
                 final_checkpoint_id=final_checkpoint_id,
                 timestamp=now,
             )
+
             new_messages.append(Message(
                 role=RoleEnum.assistant,
                 content=assistant_response,
@@ -442,17 +559,26 @@ async def save_edit_turn(
 
         conversation.messages.extend(new_messages)
 
-        # ✅ Also update user_prompts — replace last prompt with new one
-        if conversation.user_prompts:
-            conversation.user_prompts[-1] = new_user_query
-        else:
-            conversation.user_prompts.append(new_user_query)
+        # ─────────────────────────────────────────────
+        # STEP 5: FIX user_prompts (CRITICAL)
+        # ─────────────────────────────────────────────
+        user_prompt_index = 0
 
+        for i, msg in enumerate(conversation.messages):
+            if msg.role == RoleEnum.user:
+                if i == target_user_idx:
+                    break
+                user_prompt_index += 1
+
+        conversation.user_prompts = conversation.user_prompts[:user_prompt_index]
+        conversation.user_prompts.append(new_user_query)
+
+        # ─────────────────────────────────────────────
         conversation.updated_at = now
         await conversation.save()
 
         return {"success": True}
 
     except Exception as e:
-        logger.exception("save_edit_turn failed for thread=%s", thread_id)
+        logger.exception("save_edit_turn failed")
         return {"success": False, "message": str(e)}

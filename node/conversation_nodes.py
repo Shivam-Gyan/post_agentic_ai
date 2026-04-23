@@ -36,10 +36,14 @@ async def chat_node_func(state: BlogState):
 
         gen = get_generation_model()
         agent_tools = getattr(agent, "tools", None)
+
+        print(agent_tools)
         if agent_tools:
             gen = gen.bind_tools(agent_tools)
 
         response = await gen.ainvoke(conversation_prompt)
+
+        print(f"\n\nResponse from chat node: \n {response}")
 
         return {
             "messages": [response]
